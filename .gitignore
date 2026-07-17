@@ -1,0 +1,20 @@
+# ROS 2 build outputs
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# Keil MDK build outputs and per-user settings
+stm32/LeArm_Test/MDK-ARM/**/*.axf
+stm32/LeArm_Test/MDK-ARM/**/*.crf
+stm32/LeArm_Test/MDK-ARM/**/*.d
+stm32/LeArm_Test/MDK-ARM/**/*.dep
+stm32/LeArm_Test/MDK-ARM/**/*.hex
+stm32/LeArm_Test/MDK-ARM/**/*.htm
+stm32/LeArm_Test/MDK-ARM/**/*.lnp
+stm32/LeArm_Test/MDK-ARM/**/*.map
+stm32/LeArm_Test/MDK-ARM/**/*.o
+stm32/LeArm_Test/MDK-ARM/*.uvguix.*
+stm32/LeArm_Test/MDK-ARM/*.uvoptx
+stm32/LeArm_Test/MDK-ARM/*.lst
+stm32/LeArm_Test/MDK-ARM/codex_build.log
+stm32/LeArm_Test/*.exe

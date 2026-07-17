@@ -1,0 +1,9 @@
+---
+bool success
+uint8 error_code
+bool moving
+bool estop_active
+uint8 moving_mask
+uint16[6] current_pulse_us
+uint16[6] target_pulse_us
+string message

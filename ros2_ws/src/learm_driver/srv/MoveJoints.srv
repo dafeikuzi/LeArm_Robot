@@ -1,0 +1,7 @@
+string[] joint_names
+float64[] positions_rad
+uint32 duration_ms
+---
+bool success
+uint8 error_code
+string message

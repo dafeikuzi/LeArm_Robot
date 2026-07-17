@@ -1,0 +1,5 @@
+# Hexadecimal bytes to write, for example: "55 AA 01 00 FF".
+string data
+---
+bool success
+string message
