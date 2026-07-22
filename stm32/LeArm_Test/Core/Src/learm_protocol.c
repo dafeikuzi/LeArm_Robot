@@ -9,6 +9,7 @@
 #define LEARM_FRAME_MIN_LEN       8U
 #define LEARM_FRAME_MAX_LEN       64U
 #define LEARM_FRAME_QUEUE_SIZE    4U
+#define LEARM_TX_FRAME_QUEUE_SIZE 8U
 #define LEARM_MAX_PAYLOAD_LEN     (LEARM_FRAME_MAX_LEN - LEARM_FRAME_MIN_LEN)
 
 #define LEARM_CMD_MOVE_PULSES     0x10U
@@ -42,6 +43,12 @@ static uint8_t frameQueue[LEARM_FRAME_QUEUE_SIZE][LEARM_FRAME_MAX_LEN];
 static uint8_t frameQueueLength[LEARM_FRAME_QUEUE_SIZE];
 static volatile uint8_t frameQueueHead;
 static volatile uint8_t frameQueueTail;
+static uint8_t txFrameQueue[LEARM_TX_FRAME_QUEUE_SIZE][LEARM_FRAME_MAX_LEN];
+static uint8_t txFrameQueueLength[LEARM_TX_FRAME_QUEUE_SIZE];
+static uint8_t txFrameQueueHead;
+static uint8_t txFrameQueueTail;
+static volatile uint8_t uartTxBusy;
+static volatile uint8_t uartTxComplete;
 static uint8_t estopActive;
 
 static uint16_t LeArm_ReadU16(const uint8_t *data)
@@ -174,16 +181,51 @@ static void LeArm_ProtocolAcceptByte(uint8_t value)
   }
 }
 
-static void LeArm_ProtocolSendFrame(uint8_t sequence, uint8_t command,
+static uint8_t LeArm_ProtocolCanQueueTx(void)
+{
+  uint8_t nextHead = (uint8_t)((txFrameQueueHead + 1U) % LEARM_TX_FRAME_QUEUE_SIZE);
+
+  return (nextHead != txFrameQueueTail);
+}
+
+static void LeArm_ProtocolServiceTx(void)
+{
+  if (protocolUart == 0)
+  {
+    return;
+  }
+
+  if (uartTxComplete != 0U)
+  {
+    uartTxComplete = 0U;
+    txFrameQueueTail = (uint8_t)((txFrameQueueTail + 1U) % LEARM_TX_FRAME_QUEUE_SIZE);
+  }
+
+  if ((uartTxBusy != 0U) || (txFrameQueueTail == txFrameQueueHead))
+  {
+    return;
+  }
+
+  uartTxBusy = 1U;
+  if (HAL_UART_Transmit_IT(protocolUart, txFrameQueue[txFrameQueueTail],
+    txFrameQueueLength[txFrameQueueTail]) != HAL_OK)
+  {
+    uartTxBusy = 0U;
+  }
+}
+
+static uint8_t LeArm_ProtocolSendFrame(uint8_t sequence, uint8_t command,
   const uint8_t *payload, uint8_t payloadLength)
 {
   uint8_t frame[LEARM_FRAME_MAX_LEN];
   uint8_t length;
+  uint8_t nextHead;
   uint16_t crc;
 
-  if ((protocolUart == 0) || (payloadLength > LEARM_MAX_PAYLOAD_LEN))
+  if ((protocolUart == 0) || (payloadLength > LEARM_MAX_PAYLOAD_LEN) ||
+    (LeArm_ProtocolCanQueueTx() == 0U))
   {
-    return;
+    return 0U;
   }
 
   frame[0] = LEARM_FRAME_HEADER_1;
@@ -200,7 +242,11 @@ static void LeArm_ProtocolSendFrame(uint8_t sequence, uint8_t command,
   frame[6U + payloadLength] = (uint8_t)(crc & 0xFFU);
   frame[7U + payloadLength] = (uint8_t)((crc >> 8) & 0xFFU);
   length = (uint8_t)(LEARM_FRAME_MIN_LEN + payloadLength);
-  (void)HAL_UART_Transmit(protocolUart, frame, length, 100U);
+  memcpy(txFrameQueue[txFrameQueueHead], frame, length);
+  txFrameQueueLength[txFrameQueueHead] = length;
+  nextHead = (uint8_t)((txFrameQueueHead + 1U) % LEARM_TX_FRAME_QUEUE_SIZE);
+  txFrameQueueHead = nextHead;
+  return 1U;
 }
 
 static void LeArm_ProtocolSendAck(uint8_t sequence, uint8_t requestCommand, uint8_t status)
@@ -315,6 +361,21 @@ static void LeArm_ProtocolHandleFrame(const uint8_t *frame, uint8_t frameLength)
   sequence = frame[3];
   command = frame[4];
   payload = &frame[6];
+  if ((frame[2] == LEARM_PROTOCOL_VERSION) && (command == LEARM_CMD_EMERGENCY_STOP) &&
+    (payloadLength == 0U))
+  {
+    LeArm_ServoEmergencyStop();
+    estopActive = 1U;
+    if (LeArm_ProtocolCanQueueTx() != 0U)
+    {
+      LeArm_ProtocolSendAck(sequence, command, LEARM_STATUS_OK);
+    }
+    return;
+  }
+  if (LeArm_ProtocolCanQueueTx() == 0U)
+  {
+    return;
+  }
   if (frame[2] != LEARM_PROTOCOL_VERSION)
   {
     LeArm_ProtocolSendAck(sequence, command, LEARM_STATUS_UNSUPPORTED_COMMAND);
@@ -339,16 +400,7 @@ static void LeArm_ProtocolHandleFrame(const uint8_t *frame, uint8_t frameLength)
       break;
 
     case LEARM_CMD_EMERGENCY_STOP:
-      if (payloadLength == 0U)
-      {
-        LeArm_ServoEmergencyStop();
-        estopActive = 1U;
-        LeArm_ProtocolSendAck(sequence, command, LEARM_STATUS_OK);
-      }
-      else
-      {
-        LeArm_ProtocolSendAck(sequence, command, LEARM_STATUS_INVALID_PAYLOAD);
-      }
+      LeArm_ProtocolSendAck(sequence, command, LEARM_STATUS_INVALID_PAYLOAD);
       break;
 
     case LEARM_CMD_CLEAR_ESTOP:
@@ -375,6 +427,10 @@ void LeArm_ProtocolInit(UART_HandleTypeDef *huart)
   LeArm_ProtocolResetParser();
   frameQueueHead = 0U;
   frameQueueTail = 0U;
+  txFrameQueueHead = 0U;
+  txFrameQueueTail = 0U;
+  uartTxBusy = 0U;
+  uartTxComplete = 0U;
   estopActive = 0U;
 
   if (protocolUart != 0)
@@ -388,9 +444,20 @@ void LeArm_ProtocolTask(void)
   uint8_t frame[LEARM_FRAME_MAX_LEN];
   uint8_t frameLength;
 
+  LeArm_ProtocolServiceTx();
   while (LeArm_ProtocolPopFrame(frame, &frameLength) != 0U)
   {
     LeArm_ProtocolHandleFrame(frame, frameLength);
+  }
+  LeArm_ProtocolServiceTx();
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart == protocolUart)
+  {
+    uartTxBusy = 0U;
+    uartTxComplete = 1U;
   }
 }
 

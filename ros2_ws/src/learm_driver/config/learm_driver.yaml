@@ -1,7 +1,10 @@
 learm_driver:
   ros__parameters:
     calibration_enabled: false
-    ack_timeout_ms: 200
+    calibration_mode_enabled: false
+    calibration_min_duration_ms: 200
+    calibration_max_duration_ms: 1000
+    ack_timeout_ms: 1000
     serial_send_service: /serial_controller/send_hex
     serial_received_topic: /serial_controller/received_hex
 
@@ -10,33 +13,45 @@ learm_driver:
     joint_1.max_position_rad: 0.0
     joint_1.pulse_at_min_position_us: 0
     joint_1.pulse_at_max_position_us: 0
+    joint_1.calibration_min_pulse_us: 500
+    joint_1.calibration_max_pulse_us: 1500
 
     joint_2.id: 2
     joint_2.min_position_rad: 0.0
     joint_2.max_position_rad: 0.0
     joint_2.pulse_at_min_position_us: 0
     joint_2.pulse_at_max_position_us: 0
+    joint_2.calibration_min_pulse_us: 500
+    joint_2.calibration_max_pulse_us: 2500
 
     joint_3.id: 3
     joint_3.min_position_rad: 0.0
     joint_3.max_position_rad: 0.0
     joint_3.pulse_at_min_position_us: 0
     joint_3.pulse_at_max_position_us: 0
+    joint_3.calibration_min_pulse_us: 500
+    joint_3.calibration_max_pulse_us: 2500
 
     joint_4.id: 4
     joint_4.min_position_rad: 0.0
     joint_4.max_position_rad: 0.0
     joint_4.pulse_at_min_position_us: 0
     joint_4.pulse_at_max_position_us: 0
+    joint_4.calibration_min_pulse_us: 500
+    joint_4.calibration_max_pulse_us: 2500
 
     joint_5.id: 5
     joint_5.min_position_rad: 0.0
     joint_5.max_position_rad: 0.0
     joint_5.pulse_at_min_position_us: 0
     joint_5.pulse_at_max_position_us: 0
+    joint_5.calibration_min_pulse_us: 500
+    joint_5.calibration_max_pulse_us: 2500
 
     joint_6.id: 6
     joint_6.min_position_rad: 0.0
     joint_6.max_position_rad: 0.0
     joint_6.pulse_at_min_position_us: 0
     joint_6.pulse_at_max_position_us: 0
+    joint_6.calibration_min_pulse_us: 500
+    joint_6.calibration_max_pulse_us: 2500

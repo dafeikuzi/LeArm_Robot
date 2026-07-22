@@ -14,6 +14,7 @@ find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "srv/CalibrationMovePwm.srv"
   "srv/MoveJoints.srv"
   "srv/GetArmStatus.srv"
 )

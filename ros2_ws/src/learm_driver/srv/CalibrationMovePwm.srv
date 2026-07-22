@@ -1,0 +1,8 @@
+string joint_name
+uint16 target_pulse_us
+uint32 duration_ms
+---
+bool success
+uint8 error_code
+uint16 current_pulse_us
+string message

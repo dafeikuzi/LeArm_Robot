@@ -1,10 +1,12 @@
 from launch import LaunchDescription
-from launch.substitutions import PathJoinSubstitution
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
+    calibration_mode_enabled = LaunchConfiguration('calibration_mode_enabled')
     serial_config = PathJoinSubstitution([
         FindPackageShare('arm_serial_control'),
         'config',
@@ -16,6 +18,10 @@ def generate_launch_description():
         'learm_driver.yaml',
     ])
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'calibration_mode_enabled',
+            default_value='false',
+        ),
         Node(
             package='arm_serial_control',
             executable='serial_controller',
@@ -28,6 +34,8 @@ def generate_launch_description():
             executable='learm_driver_node',
             name='learm_driver',
             output='screen',
-            parameters=[driver_config],
+            parameters=[driver_config, {
+                'calibration_mode_enabled': calibration_mode_enabled,
+            }],
         ),
     ])

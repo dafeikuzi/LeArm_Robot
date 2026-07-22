@@ -11,6 +11,7 @@ extern TIM_HandleTypeDef htim4;
 
 #define LEARM_SERVO_UPDATE_MS   20U
 #define LEARM_SERVO_MAX_TIME_MS 30000U
+#define LEARM_SERVO_Q15_ONE     32768U
 
 static const LeArmServoOutput servoOutputs[LEARM_SERVO_MAX_ID + 1U] =
 {
@@ -34,6 +35,23 @@ static uint16_t servoTargetPulseUs[LEARM_SERVO_MAX_ID + 1U];
 static uint16_t servoTotalSteps[LEARM_SERVO_MAX_ID + 1U];
 static uint16_t servoStep[LEARM_SERVO_MAX_ID + 1U];
 static uint8_t servoMoving[LEARM_SERVO_MAX_ID + 1U];
+
+static uint16_t LeArm_ServoSmoothstepQ15(uint16_t step, uint16_t totalSteps)
+{
+  uint32_t t;
+  uint32_t tSquared;
+  uint32_t tCubed;
+
+  if ((totalSteps == 0U) || (step >= totalSteps))
+  {
+    return LEARM_SERVO_Q15_ONE;
+  }
+
+  t = ((uint32_t)step << 15) / totalSteps;
+  tSquared = (t * t) >> 15;
+  tCubed = (tSquared * t) >> 15;
+  return (uint16_t)((3U * tSquared) - (2U * tCubed));
+}
 
 static uint16_t LeArm_ClampPulse(uint16_t pulseUs)
 {
@@ -128,8 +146,9 @@ void LeArm_ServoUpdate20ms(void)
     else
     {
       int32_t delta = (int32_t)servoTargetPulseUs[id] - (int32_t)servoStartPulseUs[id];
+      int32_t progress = (int32_t)LeArm_ServoSmoothstepQ15(servoStep[id], servoTotalSteps[id]);
       int32_t pulse = (int32_t)servoStartPulseUs[id]
-                    + ((delta * (int32_t)servoStep[id]) / (int32_t)servoTotalSteps[id]);
+                    + ((delta * progress) / (int32_t)LEARM_SERVO_Q15_ONE);
       servoCurrentPulseUs[id] = (uint16_t)pulse;
     }
 

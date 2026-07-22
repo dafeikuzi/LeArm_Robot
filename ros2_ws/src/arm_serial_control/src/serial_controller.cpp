@@ -10,6 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 #include <vector>
@@ -88,7 +89,7 @@ public:
     const auto auto_connect = declare_parameter<bool>("auto_connect", false);
     const auto read_period_ms = declare_parameter<int>("read_period_ms", 20);
 
-    received_publisher_ = create_publisher<std_msgs::msg::String>("received_hex", 10);
+    received_publisher_ = create_publisher<std_msgs::msg::String>("~/received_hex", 10);
     connect_service_ = create_service<std_srvs::srv::Trigger>(
       "~/connect",
       [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
@@ -126,6 +127,25 @@ public:
   }
 
 private:
+  bool set_normal_run_modem_lines()
+  {
+    int modem_bits = 0;
+    if (ioctl(serial_fd_, TIOCMGET, &modem_bits) != 0) {
+      last_error_ = "cannot read modem control lines: " + std::string(std::strerror(errno));
+      return false;
+    }
+
+    // The Elite V2 CH340 auto-download circuit enters the STM32 bootloader
+    // when DTR is low and RTS is high. Keep its normal-run state explicitly.
+    modem_bits |= TIOCM_DTR;
+    modem_bits &= ~TIOCM_RTS;
+    if (ioctl(serial_fd_, TIOCMSET, &modem_bits) != 0) {
+      last_error_ = "cannot set modem control lines: " + std::string(std::strerror(errno));
+      return false;
+    }
+    return true;
+  }
+
   bool connect()
   {
     if (serial_fd_ >= 0) {
@@ -146,6 +166,11 @@ private:
       return false;
     }
 
+    if (!set_normal_run_modem_lines()) {
+      disconnect();
+      return false;
+    }
+
     termios options{};
     if (tcgetattr(serial_fd_, &options) != 0) {
       last_error_ = "cannot read serial settings: " + std::string(std::strerror(errno));
@@ -156,6 +181,7 @@ private:
     cfsetispeed(&options, *speed);
     cfsetospeed(&options, *speed);
     options.c_cflag |= CLOCAL | CREAD;
+    options.c_cflag &= ~HUPCL;
     options.c_cflag &= ~CSTOPB;
     options.c_cflag &= ~CRTSCTS;
     options.c_cflag &= ~CSIZE;
@@ -168,7 +194,14 @@ private:
       return false;
     }
 
-    RCLCPP_INFO(get_logger(), "Connected to %s at %d baud", port_.c_str(), baud_rate_);
+    if (!set_normal_run_modem_lines()) {
+      disconnect();
+      return false;
+    }
+
+    RCLCPP_INFO(
+      get_logger(), "Connected to %s at %d baud (DTR=high, RTS=low)",
+      port_.c_str(), baud_rate_);
     return true;
   }
 

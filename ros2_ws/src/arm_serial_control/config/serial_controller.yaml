@@ -2,5 +2,5 @@ serial_controller:
   ros__parameters:
     port: /dev/ttyUSB0
     baud_rate: 9600
-    auto_connect: false
+    auto_connect: true
     read_period_ms: 20

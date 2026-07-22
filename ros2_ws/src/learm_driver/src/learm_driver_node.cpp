@@ -18,6 +18,7 @@
 #include "std_srvs/srv/trigger.hpp"
 
 #include "arm_serial_control/srv/send_hex.hpp"
+#include "learm_driver/srv/calibration_move_pwm.hpp"
 #include "learm_driver/protocol.hpp"
 #include "learm_driver/srv/get_arm_status.hpp"
 #include "learm_driver/srv/move_joints.hpp"
@@ -37,6 +38,8 @@ struct JointCalibration
   double max_position_rad{};
   int min_position_pulse_us{};
   int max_position_pulse_us{};
+  int calibration_min_pulse_us{};
+  int calibration_max_pulse_us{};
 };
 
 struct PendingResponse
@@ -70,21 +73,34 @@ public:
   : Node("learm_driver")
   {
     calibration_enabled_ = declare_parameter<bool>("calibration_enabled", false);
-    ack_timeout_ms_ = declare_parameter<int>("ack_timeout_ms", 200);
+    calibration_mode_enabled_ = declare_parameter<bool>("calibration_mode_enabled", false);
+    calibration_min_duration_ms_ = declare_parameter<int>("calibration_min_duration_ms", 2000);
+    calibration_max_duration_ms_ = declare_parameter<int>("calibration_max_duration_ms", 30000);
+    ack_timeout_ms_ = declare_parameter<int>("ack_timeout_ms", 1000);
     const auto serial_service = declare_parameter<std::string>(
       "serial_send_service", "/serial_controller/send_hex");
     const auto received_topic = declare_parameter<std::string>(
       "serial_received_topic", "/serial_controller/received_hex");
     load_calibration();
 
-    serial_client_ = create_client<arm_serial_control::srv::SendHex>(serial_service);
+    transaction_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+    serial_client_ = create_client<arm_serial_control::srv::SendHex>(
+      serial_service, rmw_qos_profile_services_default, transaction_callback_group_);
+    rclcpp::SubscriptionOptions subscription_options;
+    subscription_options.callback_group = transaction_callback_group_;
     received_subscription_ = create_subscription<std_msgs::msg::String>(
       received_topic, 20,
-      std::bind(&LeArmDriver::received_hex_callback, this, std::placeholders::_1));
+      std::bind(&LeArmDriver::received_hex_callback, this, std::placeholders::_1),
+      subscription_options);
 
     move_service_ = create_service<learm_driver::srv::MoveJoints>(
       "~/move_joints",
       std::bind(&LeArmDriver::move_joints_callback, this, std::placeholders::_1, std::placeholders::_2));
+    calibration_move_service_ = create_service<learm_driver::srv::CalibrationMovePwm>(
+      "~/calibration_move_pwm",
+      std::bind(
+        &LeArmDriver::calibration_move_callback, this, std::placeholders::_1,
+        std::placeholders::_2));
     status_service_ = create_service<learm_driver::srv::GetArmStatus>(
       "~/get_status",
       std::bind(&LeArmDriver::get_status_callback, this, std::placeholders::_1, std::placeholders::_2));
@@ -113,6 +129,10 @@ private:
         name + ".pulse_at_min_position_us", 0);
       calibration.max_position_pulse_us = declare_parameter<int>(
         name + ".pulse_at_max_position_us", 0);
+      calibration.calibration_min_pulse_us = declare_parameter<int>(
+        name + ".calibration_min_pulse_us", 0);
+      calibration.calibration_max_pulse_us = declare_parameter<int>(
+        name + ".calibration_max_pulse_us", 0);
       calibration_.emplace(name, calibration);
     }
   }
@@ -169,6 +189,32 @@ private:
     }
     pulse = static_cast<uint16_t>(rounded);
     return true;
+  }
+
+  bool validate_calibration_mode(std::string & error) const
+  {
+    if (!calibration_mode_enabled_) {
+      error = "calibration mode is disabled";
+      return false;
+    }
+    if (calibration_enabled_) {
+      error = "disable formal motion before using calibration mode";
+      return false;
+    }
+    if (calibration_min_duration_ms_ < static_cast<int>(kMinimumMoveTimeMs) ||
+      calibration_max_duration_ms_ < calibration_min_duration_ms_ ||
+      calibration_max_duration_ms_ > static_cast<int>(kMaximumMoveTimeMs))
+    {
+      error = "calibration safety parameters are invalid";
+      return false;
+    }
+    return true;
+  }
+
+  bool request_status_frame(learm_driver::Frame & frame, uint8_t & error_code, std::string & error)
+  {
+    return send_transaction(learm_driver::kCommandGetStatus, {}, learm_driver::kCommandStatus,
+      frame, error_code, error);
   }
 
   void move_joints_callback(
@@ -261,8 +307,7 @@ private:
     std::string error;
     uint8_t error_code = learm_driver::kStatusOk;
     learm_driver::Frame frame;
-    if (!send_transaction(learm_driver::kCommandGetStatus, {}, learm_driver::kCommandStatus,
-        frame, error_code, error))
+    if (!request_status_frame(frame, error_code, error))
     {
       response->success = false;
       response->error_code = error_code;
@@ -285,6 +330,104 @@ private:
     response->success = true;
     response->error_code = learm_driver::kStatusOk;
     response->message = "status received from STM32";
+  }
+
+  void calibration_move_callback(
+    const std::shared_ptr<learm_driver::srv::CalibrationMovePwm::Request> request,
+    std::shared_ptr<learm_driver::srv::CalibrationMovePwm::Response> response)
+  {
+    std::string error;
+    if (!validate_calibration_mode(error)) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusCalibrationDisabled;
+      response->message = error;
+      return;
+    }
+
+    const auto calibration = calibration_.find(request->joint_name);
+    if (calibration == calibration_.end()) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusInvalidPayload;
+      response->message = "joint_name must be one of joint_1 through joint_6";
+      return;
+    }
+    const auto & joint = calibration->second;
+    const int target_pulse = static_cast<int>(request->target_pulse_us);
+    if (joint.calibration_min_pulse_us < 500 || joint.calibration_max_pulse_us > 2500 ||
+      joint.calibration_min_pulse_us > joint.calibration_max_pulse_us ||
+      (joint.id == 1 && joint.calibration_max_pulse_us > 1500))
+    {
+      response->success = false;
+      response->error_code = learm_driver::kStatusCalibrationInvalid;
+      response->message = "calibration PWM window is invalid for " + request->joint_name;
+      return;
+    }
+    if (target_pulse < joint.calibration_min_pulse_us ||
+      target_pulse > joint.calibration_max_pulse_us)
+    {
+      response->success = false;
+      response->error_code = learm_driver::kStatusInvalidPayload;
+      response->message = "target PWM is outside the configured calibration window";
+      return;
+    }
+    if (request->duration_ms < static_cast<uint32_t>(calibration_min_duration_ms_) ||
+      request->duration_ms > static_cast<uint32_t>(calibration_max_duration_ms_))
+    {
+      response->success = false;
+      response->error_code = learm_driver::kStatusInvalidPayload;
+      response->message = "duration_ms is outside the configured calibration range";
+      return;
+    }
+
+    learm_driver::Frame status_frame;
+    uint8_t error_code = learm_driver::kStatusOk;
+    if (!request_status_frame(status_frame, error_code, error)) {
+      response->success = false;
+      response->error_code = error_code;
+      response->message = error;
+      return;
+    }
+    if (status_frame.payload.size() != kStatusPayloadSize) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusInvalidPayload;
+      response->message = "STM32 returned an invalid status payload";
+      return;
+    }
+    if ((status_frame.payload[0] & 0x02U) != 0U) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusEstopActive;
+      response->message = "STM32 software estop is active";
+      return;
+    }
+    if (status_frame.payload[1] != 0U) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusInvalidPayload;
+      response->message = "wait for all joints to stop before calibration motion";
+      return;
+    }
+
+    response->current_pulse_us = read_u16_le(
+      status_frame.payload, 2 + ((joint.id - 1U) * 2U));
+
+    std::vector<uint8_t> payload;
+    append_u16_le(payload, static_cast<uint16_t>(request->duration_ms));
+    payload.push_back(1U);
+    payload.push_back(joint.id);
+    append_u16_le(payload, request->target_pulse_us);
+
+    learm_driver::Frame ack_frame;
+    if (!send_transaction(learm_driver::kCommandMovePulses, payload, learm_driver::kCommandAck,
+        ack_frame, error_code, error) ||
+      !decode_ack(ack_frame, learm_driver::kCommandMovePulses, error_code, error))
+    {
+      response->success = false;
+      response->error_code = error_code;
+      response->message = error;
+      return;
+    }
+    response->success = true;
+    response->error_code = learm_driver::kStatusOk;
+    response->message = "single-joint calibration motion accepted by STM32";
   }
 
   void emergency_stop_callback(
@@ -462,6 +605,9 @@ private:
   }
 
   bool calibration_enabled_{};
+  bool calibration_mode_enabled_{};
+  int calibration_min_duration_ms_{};
+  int calibration_max_duration_ms_{};
   int ack_timeout_ms_{};
   uint8_t sequence_{};
   std::map<std::string, JointCalibration> calibration_;
@@ -473,8 +619,10 @@ private:
   std::condition_variable pending_cv_;
 
   rclcpp::Client<arm_serial_control::srv::SendHex>::SharedPtr serial_client_;
+  rclcpp::CallbackGroup::SharedPtr transaction_callback_group_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr received_subscription_;
   rclcpp::Service<learm_driver::srv::MoveJoints>::SharedPtr move_service_;
+  rclcpp::Service<learm_driver::srv::CalibrationMovePwm>::SharedPtr calibration_move_service_;
   rclcpp::Service<learm_driver::srv::GetArmStatus>::SharedPtr status_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr estop_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_estop_service_;
@@ -484,8 +632,10 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 2);
-  executor.add_node(std::make_shared<LeArmDriver>());
+  auto node = std::make_shared<LeArmDriver>();
+  executor.add_node(node);
   executor.spin();
+  executor.remove_node(node);
   rclcpp::shutdown();
   return 0;
 }

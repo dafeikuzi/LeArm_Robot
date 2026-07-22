@@ -20,7 +20,17 @@ Services:
 - `/learm_driver/get_status`: returns the STM32 estimated current and target PWM values.
 - `/learm_driver/emergency_stop`: freezes PWM interpolation and latches software stop.
 - `/learm_driver/clear_estop`: permits later movement commands.
+- `/learm_driver/calibration_move_pwm`: moves one servo by PWM for preliminary
+  zero, direction and safe-range testing. It only works when
+  `calibration_mode_enabled` is true and formal motion remains disabled.
 
 Motion is intentionally disabled in `config/learm_driver.yaml`. Set all six
 joint calibration ranges and then set `calibration_enabled: true` only after
 confirming each joint's safe direction and mechanical limits.
+
+For interactive PWM calibration, start the driver with
+`calibration_mode_enabled:=true`, then run:
+
+```bash
+ros2 run learm_calibration_gui learm_calibration_gui
+```
