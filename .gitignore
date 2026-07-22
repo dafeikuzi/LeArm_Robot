@@ -3,6 +3,10 @@ ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # Keil MDK build outputs and per-user settings
 stm32/LeArm_Test/MDK-ARM/**/*.axf
 stm32/LeArm_Test/MDK-ARM/**/*.crf

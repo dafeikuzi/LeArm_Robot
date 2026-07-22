@@ -1,0 +1,9 @@
+# The five values map to joint_2 through joint_6 in that fixed order.
+# 0.0 means fully closed and 1.0 means fully open.
+float64 opening
+float64[5] positions_rad
+uint32 duration_ms
+---
+bool success
+uint8 error_code
+string message

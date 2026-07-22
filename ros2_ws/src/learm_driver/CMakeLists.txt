@@ -16,7 +16,9 @@ find_package(std_srvs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/CalibrationMovePwm.srv"
   "srv/MoveJoints.srv"
+  "srv/MovePose.srv"
   "srv/GetArmStatus.srv"
+  "srv/SetGripper.srv"
 )
 
 add_library(learm_protocol src/protocol.cpp)

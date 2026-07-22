@@ -22,13 +22,15 @@
 #include "learm_driver/protocol.hpp"
 #include "learm_driver/srv/get_arm_status.hpp"
 #include "learm_driver/srv/move_joints.hpp"
+#include "learm_driver/srv/move_pose.hpp"
+#include "learm_driver/srv/set_gripper.hpp"
 
 namespace
 {
 
 constexpr uint32_t kMinimumMoveTimeMs = 20;
 constexpr uint32_t kMaximumMoveTimeMs = 30000;
-constexpr std::size_t kJointCount = 6;
+constexpr std::size_t kServoCount = 6;
 constexpr std::size_t kStatusPayloadSize = 26;
 
 struct JointCalibration
@@ -40,6 +42,13 @@ struct JointCalibration
   int max_position_pulse_us{};
   int calibration_min_pulse_us{};
   int calibration_max_pulse_us{};
+};
+
+struct GripperConfiguration
+{
+  uint8_t id{};
+  int open_pulse_us{};
+  int closed_pulse_us{};
 };
 
 struct PendingResponse
@@ -82,6 +91,7 @@ public:
     const auto received_topic = declare_parameter<std::string>(
       "serial_received_topic", "/serial_controller/received_hex");
     load_calibration();
+    load_gripper_configuration();
 
     transaction_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     serial_client_ = create_client<arm_serial_control::srv::SendHex>(
@@ -96,11 +106,17 @@ public:
     move_service_ = create_service<learm_driver::srv::MoveJoints>(
       "~/move_joints",
       std::bind(&LeArmDriver::move_joints_callback, this, std::placeholders::_1, std::placeholders::_2));
+    pose_service_ = create_service<learm_driver::srv::MovePose>(
+      "~/move_pose",
+      std::bind(&LeArmDriver::move_pose_callback, this, std::placeholders::_1, std::placeholders::_2));
     calibration_move_service_ = create_service<learm_driver::srv::CalibrationMovePwm>(
       "~/calibration_move_pwm",
       std::bind(
         &LeArmDriver::calibration_move_callback, this, std::placeholders::_1,
         std::placeholders::_2));
+    gripper_service_ = create_service<learm_driver::srv::SetGripper>(
+      "~/set_gripper",
+      std::bind(&LeArmDriver::set_gripper_callback, this, std::placeholders::_1, std::placeholders::_2));
     status_service_ = create_service<learm_driver::srv::GetArmStatus>(
       "~/get_status",
       std::bind(&LeArmDriver::get_status_callback, this, std::placeholders::_1, std::placeholders::_2));
@@ -119,7 +135,7 @@ public:
 private:
   void load_calibration()
   {
-    for (std::size_t index = 1; index <= kJointCount; ++index) {
+    for (std::size_t index = 1; index <= kServoCount; ++index) {
       const auto name = "joint_" + std::to_string(index);
       JointCalibration calibration;
       calibration.id = static_cast<uint8_t>(declare_parameter<int>(name + ".id", index));
@@ -137,13 +153,23 @@ private:
     }
   }
 
+  void load_gripper_configuration()
+  {
+    gripper_.id = static_cast<uint8_t>(declare_parameter<int>("gripper.id", 1));
+    gripper_.open_pulse_us = declare_parameter<int>("gripper.open_pulse_us", 0);
+    gripper_.closed_pulse_us = declare_parameter<int>("gripper.closed_pulse_us", 0);
+  }
+
   bool validate_calibration(std::string & error) const
   {
     std::set<uint8_t> ids;
     for (const auto & [name, calibration] : calibration_) {
-      if (calibration.id < 1 || calibration.id > kJointCount || !ids.insert(calibration.id).second) {
+      if (calibration.id < 1 || calibration.id > kServoCount || !ids.insert(calibration.id).second) {
         error = "calibration contains an invalid or duplicate servo ID";
         return false;
+      }
+      if (name == "joint_1") {
+        continue;
       }
       if (!std::isfinite(calibration.min_position_rad) ||
         !std::isfinite(calibration.max_position_rad) ||
@@ -168,6 +194,18 @@ private:
     return true;
   }
 
+  bool validate_gripper_configuration(std::string & error) const
+  {
+    if (gripper_.id != 1 || gripper_.open_pulse_us < 500 || gripper_.open_pulse_us > 1500 ||
+      gripper_.closed_pulse_us < 500 || gripper_.closed_pulse_us > 1500 ||
+      gripper_.open_pulse_us == gripper_.closed_pulse_us)
+    {
+      error = "gripper configuration must use servo ID 1 and distinct pulses from 500 to 1500 us";
+      return false;
+    }
+    return true;
+  }
+
   bool position_to_pulse(const JointCalibration & calibration, const double position_rad,
     uint16_t & pulse, std::string & error) const
   {
@@ -188,6 +226,18 @@ private:
       return false;
     }
     pulse = static_cast<uint16_t>(rounded);
+    return true;
+  }
+
+  bool opening_to_pulse(const double opening, uint16_t & pulse, std::string & error) const
+  {
+    if (!std::isfinite(opening) || opening < 0.0 || opening > 1.0) {
+      error = "opening must be within 0.0 (closed) and 1.0 (open)";
+      return false;
+    }
+    const double mapped = static_cast<double>(gripper_.closed_pulse_us) + opening *
+      static_cast<double>(gripper_.open_pulse_us - gripper_.closed_pulse_us);
+    pulse = static_cast<uint16_t>(std::lround(mapped));
     return true;
   }
 
@@ -217,6 +267,24 @@ private:
       frame, error_code, error);
   }
 
+  bool send_move_targets(std::vector<std::pair<uint8_t, uint16_t>> targets,
+    const uint32_t duration_ms, uint8_t & error_code, std::string & error)
+  {
+    std::sort(targets.begin(), targets.end());
+    std::vector<uint8_t> payload;
+    append_u16_le(payload, static_cast<uint16_t>(duration_ms));
+    payload.push_back(static_cast<uint8_t>(targets.size()));
+    for (const auto & [id, pulse] : targets) {
+      payload.push_back(id);
+      append_u16_le(payload, pulse);
+    }
+
+    learm_driver::Frame frame;
+    return send_transaction(learm_driver::kCommandMovePulses, payload, learm_driver::kCommandAck,
+      frame, error_code, error) &&
+      decode_ack(frame, learm_driver::kCommandMovePulses, error_code, error);
+  }
+
   void move_joints_callback(
     const std::shared_ptr<learm_driver::srv::MoveJoints::Request> request,
     std::shared_ptr<learm_driver::srv::MoveJoints::Response> response)
@@ -234,12 +302,12 @@ private:
       response->message = error;
       return;
     }
-    if (request->joint_names.empty() || request->joint_names.size() > kJointCount ||
+    if (request->joint_names.empty() || request->joint_names.size() >= kServoCount ||
       request->joint_names.size() != request->positions_rad.size())
     {
       response->success = false;
       response->error_code = learm_driver::kStatusInvalidPayload;
-      response->message = "joint names and positions must have the same length from 1 to 6";
+      response->message = "joint names and positions must have the same length from 1 to 5";
       return;
     }
     if (request->duration_ms < kMinimumMoveTimeMs || request->duration_ms > kMaximumMoveTimeMs) {
@@ -254,10 +322,16 @@ private:
     for (std::size_t index = 0; index < request->joint_names.size(); ++index) {
       const auto & name = request->joint_names[index];
       const auto calibration = calibration_.find(name);
+      if (name == "joint_1") {
+        response->success = false;
+        response->error_code = learm_driver::kStatusInvalidPayload;
+        response->message = "joint_1 is the gripper; use /learm_driver/set_gripper";
+        return;
+      }
       if (calibration == calibration_.end() || !names.insert(name).second) {
         response->success = false;
         response->error_code = learm_driver::kStatusInvalidPayload;
-        response->message = "joint names must be unique values from joint_1 to joint_6";
+        response->message = "joint names must be unique values from joint_2 to joint_6";
         return;
       }
       uint16_t pulse = 0;
@@ -270,26 +344,8 @@ private:
       targets.emplace_back(calibration->second.id, pulse);
     }
 
-    std::sort(targets.begin(), targets.end());
-    std::vector<uint8_t> payload;
-    append_u16_le(payload, static_cast<uint16_t>(request->duration_ms));
-    payload.push_back(static_cast<uint8_t>(targets.size()));
-    for (const auto & [id, pulse] : targets) {
-      payload.push_back(id);
-      append_u16_le(payload, pulse);
-    }
-
-    learm_driver::Frame frame;
     uint8_t error_code = learm_driver::kStatusOk;
-    if (!send_transaction(learm_driver::kCommandMovePulses, payload, learm_driver::kCommandAck,
-        frame, error_code, error))
-    {
-      response->success = false;
-      response->error_code = error_code;
-      response->message = error;
-      return;
-    }
-    if (!decode_ack(frame, learm_driver::kCommandMovePulses, error_code, error)) {
+    if (!send_move_targets(std::move(targets), request->duration_ms, error_code, error)) {
       response->success = false;
       response->error_code = error_code;
       response->message = error;
@@ -298,6 +354,118 @@ private:
     response->success = true;
     response->error_code = learm_driver::kStatusOk;
     response->message = "motion accepted by STM32";
+  }
+
+  void move_pose_callback(
+    const std::shared_ptr<learm_driver::srv::MovePose::Request> request,
+    std::shared_ptr<learm_driver::srv::MovePose::Response> response)
+  {
+    if (!calibration_enabled_) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusCalibrationDisabled;
+      response->message = "motion is disabled until calibration_enabled is true";
+      return;
+    }
+    if (request->duration_ms < kMinimumMoveTimeMs || request->duration_ms > kMaximumMoveTimeMs) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusInvalidPayload;
+      response->message = "duration_ms must be between 20 and 30000";
+      return;
+    }
+
+    std::string error;
+    if (!validate_calibration(error) || !validate_gripper_configuration(error)) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusCalibrationInvalid;
+      response->message = error;
+      return;
+    }
+
+    uint16_t gripper_pulse = 0;
+    if (!opening_to_pulse(request->opening, gripper_pulse, error)) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusInvalidPayload;
+      response->message = error;
+      return;
+    }
+
+    std::vector<std::pair<uint8_t, uint16_t>> targets{{gripper_.id, gripper_pulse}};
+    for (std::size_t index = 0; index < request->positions_rad.size(); ++index) {
+      const auto name = "joint_" + std::to_string(index + 2U);
+      const auto calibration = calibration_.find(name);
+      uint16_t pulse = 0;
+      if (calibration == calibration_.end()) {
+        response->success = false;
+        response->error_code = learm_driver::kStatusInvalidPayload;
+        response->message = name + " is not configured";
+        return;
+      }
+      if (!position_to_pulse(calibration->second, request->positions_rad[index], pulse, error)) {
+        response->success = false;
+        response->error_code = learm_driver::kStatusInvalidPayload;
+        response->message = name + ": " + error;
+        return;
+      }
+      targets.emplace_back(calibration->second.id, pulse);
+    }
+
+    uint8_t error_code = learm_driver::kStatusOk;
+    if (!send_move_targets(std::move(targets), request->duration_ms, error_code, error)) {
+      response->success = false;
+      response->error_code = error_code;
+      response->message = error;
+      return;
+    }
+    response->success = true;
+    response->error_code = learm_driver::kStatusOk;
+    response->message = "six-servo pose accepted by STM32";
+  }
+
+  void set_gripper_callback(
+    const std::shared_ptr<learm_driver::srv::SetGripper::Request> request,
+    std::shared_ptr<learm_driver::srv::SetGripper::Response> response)
+  {
+    if (!calibration_enabled_) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusCalibrationDisabled;
+      response->message = "gripper motion is disabled until calibration_enabled is true";
+      return;
+    }
+
+    std::string error;
+    if (!validate_calibration(error) || !validate_gripper_configuration(error)) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusCalibrationInvalid;
+      response->message = error;
+      return;
+    }
+    if (request->duration_ms < kMinimumMoveTimeMs || request->duration_ms > kMaximumMoveTimeMs) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusInvalidPayload;
+      response->message = "duration_ms must be between 20 and 30000";
+      return;
+    }
+
+    uint16_t pulse = 0;
+    if (!opening_to_pulse(request->opening, pulse, error)) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusInvalidPayload;
+      response->message = error;
+      return;
+    }
+
+    uint8_t error_code = learm_driver::kStatusOk;
+    if (!send_move_targets({{gripper_.id, pulse}}, request->duration_ms, error_code, error))
+    {
+      response->success = false;
+      response->error_code = error_code;
+      response->message = error;
+      return;
+    }
+    response->success = true;
+    response->error_code = learm_driver::kStatusOk;
+    response->target_pulse_us = pulse;
+    response->message = "gripper motion accepted by STM32";
   }
 
   void get_status_callback(
@@ -323,7 +491,7 @@ private:
     response->moving = (frame.payload[0] & 0x01U) != 0;
     response->estop_active = (frame.payload[0] & 0x02U) != 0;
     response->moving_mask = frame.payload[1];
-    for (std::size_t index = 0; index < kJointCount; ++index) {
+    for (std::size_t index = 0; index < kServoCount; ++index) {
       response->current_pulse_us[index] = read_u16_le(frame.payload, 2 + (index * 2));
       response->target_pulse_us[index] = read_u16_le(frame.payload, 14 + (index * 2));
     }
@@ -611,6 +779,7 @@ private:
   int ack_timeout_ms_{};
   uint8_t sequence_{};
   std::map<std::string, JointCalibration> calibration_;
+  GripperConfiguration gripper_;
   std::vector<uint8_t> receive_buffer_;
   PendingResponse pending_;
   std::mutex transaction_mutex_;
@@ -622,7 +791,9 @@ private:
   rclcpp::CallbackGroup::SharedPtr transaction_callback_group_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr received_subscription_;
   rclcpp::Service<learm_driver::srv::MoveJoints>::SharedPtr move_service_;
+  rclcpp::Service<learm_driver::srv::MovePose>::SharedPtr pose_service_;
   rclcpp::Service<learm_driver::srv::CalibrationMovePwm>::SharedPtr calibration_move_service_;
+  rclcpp::Service<learm_driver::srv::SetGripper>::SharedPtr gripper_service_;
   rclcpp::Service<learm_driver::srv::GetArmStatus>::SharedPtr status_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr estop_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_estop_service_;

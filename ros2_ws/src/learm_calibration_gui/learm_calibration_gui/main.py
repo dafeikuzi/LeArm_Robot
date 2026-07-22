@@ -28,7 +28,7 @@ from std_srvs.srv import Trigger
 
 
 JOINT_LIMITS = {
-    'joint_1': (500, 1500),
+    'joint_1': (500, 1400),
     'joint_2': (500, 2500),
     'joint_3': (500, 2500),
     'joint_4': (500, 2500),

@@ -1,0 +1,8 @@
+# 0.0 means fully closed and 1.0 means fully open.
+float64 opening
+uint32 duration_ms
+---
+bool success
+uint8 error_code
+uint16 target_pulse_us
+string message

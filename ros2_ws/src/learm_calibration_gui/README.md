@@ -26,7 +26,7 @@ time. Press **Send Selected Joint** and confirm the dialog to command the
 servo. The GUI can change PWM one microsecond at a time, but the driver still
 enforces each joint's configured calibration range.
 
-The current test configuration allows `joint_1` from `500` to `1500 us`, and
+The current test configuration allows `joint_1` from `500` to `1400 us`, and
 `joint_2` through `joint_6` from `500` to `2500 us`. Motion duration is from
 `200` to `1000 ms`.
 
