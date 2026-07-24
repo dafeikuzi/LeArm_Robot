@@ -32,6 +32,7 @@ constexpr uint32_t kMinimumMoveTimeMs = 20;
 constexpr uint32_t kMaximumMoveTimeMs = 30000;
 constexpr std::size_t kServoCount = 6;
 constexpr std::size_t kStatusPayloadSize = 26;
+constexpr double kPositionToleranceRad = 1e-9;
 
 struct JointCalibration
 {
@@ -209,14 +210,17 @@ private:
   bool position_to_pulse(const JointCalibration & calibration, const double position_rad,
     uint16_t & pulse, std::string & error) const
   {
-    if (!std::isfinite(position_rad) || position_rad < calibration.min_position_rad ||
-      position_rad > calibration.max_position_rad)
+    if (!std::isfinite(position_rad) ||
+      position_rad < calibration.min_position_rad - kPositionToleranceRad ||
+      position_rad > calibration.max_position_rad + kPositionToleranceRad)
     {
       error = "target position is outside the calibrated joint range";
       return false;
     }
 
-    const double fraction = (position_rad - calibration.min_position_rad) /
+    const double bounded_position = std::clamp(
+      position_rad, calibration.min_position_rad, calibration.max_position_rad);
+    const double fraction = (bounded_position - calibration.min_position_rad) /
       (calibration.max_position_rad - calibration.min_position_rad);
     const double mapped = static_cast<double>(calibration.min_position_pulse_us) + fraction *
       static_cast<double>(calibration.max_position_pulse_us - calibration.min_position_pulse_us);

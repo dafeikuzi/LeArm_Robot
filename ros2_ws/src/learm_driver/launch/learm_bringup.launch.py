@@ -7,6 +7,7 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     calibration_mode_enabled = LaunchConfiguration('calibration_mode_enabled')
+    serial_port = LaunchConfiguration('serial_port')
     serial_config = PathJoinSubstitution([
         FindPackageShare('arm_serial_control'),
         'config',
@@ -22,12 +23,18 @@ def generate_launch_description():
             'calibration_mode_enabled',
             default_value='false',
         ),
+        DeclareLaunchArgument(
+            'serial_port',
+            default_value='/dev/ttyUSB0',
+        ),
         Node(
             package='arm_serial_control',
             executable='serial_controller',
             name='serial_controller',
             output='screen',
-            parameters=[serial_config],
+            parameters=[serial_config, {
+                'port': serial_port,
+            }],
         ),
         Node(
             package='learm_driver',

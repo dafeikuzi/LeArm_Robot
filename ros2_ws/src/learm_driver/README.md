@@ -13,6 +13,13 @@ source install/setup.bash
 ros2 launch learm_driver learm_bringup.launch.py
 ```
 
+If the CH340 device was reconnected and its Linux name changed, pass the
+current device explicitly, for example:
+
+```bash
+ros2 launch learm_driver learm_bringup.launch.py serial_port:=/dev/ttyUSB1
+```
+
 Services:
 
 - `/learm_driver/move_joints`: sends one to five rotational joint targets,

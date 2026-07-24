@@ -9,6 +9,7 @@ from PyQt5.QtCore import QSignalBlocker, QTimer, Qt
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -41,7 +42,12 @@ GRIPPER_CLOSED_PULSE_US = 1400.0
 LIVE_SEND_INTERVAL_MS = 100
 MIN_DURATION_MS = 200
 MAX_DURATION_MS = 1000
-RECORDING_FORMAT_VERSION = 1
+RECORDING_FORMAT_VERSION = 2
+EXECUTION_MODE_SYNCHRONIZED = 'synchronized'
+EXECUTION_MODE_SEQUENCED = 'sequenced'
+GRIPPER_TIMING_BEFORE = 'before'
+GRIPPER_TIMING_AFTER = 'after'
+GRIPPER_TIMING_NONE = 'none'
 
 
 @dataclass
@@ -49,6 +55,18 @@ class Keyframe:
     duration_ms: int
     opening: float
     positions_deg: list[float]
+    execution_mode: str
+    gripper_timing: str
+
+
+@dataclass
+class MotionStage:
+    kind: str
+    label: str
+    duration_ms: int
+    joint_names: tuple[str, ...] = ()
+    positions_deg: tuple[float, ...] = ()
+    opening: float | None = None
 
 
 class RecorderClient(Node):
@@ -124,6 +142,10 @@ class MotionRecorderWindow(QMainWindow):
         self.playback_active = False
         self.playback_index = 0
         self.playback_generation = 0
+        self.playback_stages = []
+        self.playback_stage_index = 0
+        self.playback_stop_after_one = False
+        self.reset_active = False
 
         self.setWindowTitle('LeArm 实时控制与动作组')
         self.setMinimumSize(1120, 700)
@@ -189,11 +211,25 @@ class MotionRecorderWindow(QMainWindow):
         duration_controls.addWidget(self.duration_spin)
         pose_layout.addRow('动作时间', duration_controls)
 
+        mode_controls = QHBoxLayout()
+        self.execution_mode_combo = QComboBox()
+        self.execution_mode_combo.addItem('安全顺序', EXECUTION_MODE_SEQUENCED)
+        self.execution_mode_combo.addItem('同步', EXECUTION_MODE_SYNCHRONIZED)
+        self.gripper_timing_combo = QComboBox()
+        self.gripper_timing_combo.addItem('夹爪后执行', GRIPPER_TIMING_AFTER)
+        self.gripper_timing_combo.addItem('夹爪前执行', GRIPPER_TIMING_BEFORE)
+        self.gripper_timing_combo.addItem('夹爪不动作', GRIPPER_TIMING_NONE)
+        mode_controls.addWidget(self.execution_mode_combo)
+        mode_controls.addWidget(self.gripper_timing_combo)
+        pose_layout.addRow('动作组执行方式', mode_controls)
+
         pose_buttons = QHBoxLayout()
         self.add_button = QPushButton('添加当前姿态')
+        self.reset_button = QPushButton('复位到零位')
         self.capture_button = QPushButton('读取 STM32 状态')
         self.estop_button = QPushButton('软件急停')
         pose_buttons.addWidget(self.add_button)
+        pose_buttons.addWidget(self.reset_button)
         pose_buttons.addWidget(self.capture_button)
         pose_buttons.addStretch()
         pose_buttons.addWidget(self.estop_button)
@@ -202,9 +238,9 @@ class MotionRecorderWindow(QMainWindow):
 
         recording_box = QGroupBox('动作组关键帧')
         recording_layout = QVBoxLayout(recording_box)
-        self.table = QTableWidget(0, 8)
+        self.table = QTableWidget(0, 10)
         self.table.setHorizontalHeaderLabels(
-            ['#', '时间', '夹爪', 'J2', 'J3', 'J4', 'J5', 'J6'])
+            ['#', '时间', '模式', '夹爪时机', '夹爪', 'J2', 'J3', 'J4', 'J5', 'J6'])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -239,6 +275,7 @@ class MotionRecorderWindow(QMainWindow):
         layout.addWidget(self.status_label)
 
         self.add_button.clicked.connect(self._add_keyframe)
+        self.reset_button.clicked.connect(self._reset_to_zero)
         self.capture_button.clicked.connect(self._capture_status)
         self.estop_button.clicked.connect(self._emergency_stop)
         self.replace_button.clicked.connect(self._replace_selected)
@@ -302,6 +339,7 @@ class MotionRecorderWindow(QMainWindow):
             request.duration_ms = self.duration_spin.value()
             self.live_request_in_flight = True
             self.last_live_send_time = time.monotonic()
+            self._update_controls()
             self.node.move_client.call_async(request).add_done_callback(self._live_arm_done)
             return
         if self.pending_gripper:
@@ -314,12 +352,14 @@ class MotionRecorderWindow(QMainWindow):
             request.duration_ms = self.duration_spin.value()
             self.live_request_in_flight = True
             self.last_live_send_time = time.monotonic()
+            self._update_controls()
             self.node.gripper_client.call_async(request).add_done_callback(self._live_gripper_done)
             return
         self.live_timer.stop()
 
     def _live_arm_done(self, future):
         self.live_request_in_flight = False
+        self._update_controls()
         try:
             response = future.result()
         except Exception as exc:
@@ -338,6 +378,7 @@ class MotionRecorderWindow(QMainWindow):
 
     def _live_gripper_done(self, future):
         self.live_request_in_flight = False
+        self._update_controls()
         try:
             response = future.result()
         except Exception as exc:
@@ -359,6 +400,8 @@ class MotionRecorderWindow(QMainWindow):
             duration_ms=self.duration_spin.value(),
             opening=self.gripper_spin.value() / 100.0,
             positions_deg=[self.angle_controls[name].value_degrees() for name in JOINT_NAMES],
+            execution_mode=self.execution_mode_combo.currentData(),
+            gripper_timing=self.gripper_timing_combo.currentData(),
         )
 
     def _add_keyframe(self):
@@ -385,10 +428,12 @@ class MotionRecorderWindow(QMainWindow):
             self.status_label.setText('等待 /learm_driver/get_status 服务...')
             return
         self.status_request_in_flight = True
+        self._update_controls()
         self.node.status_client.call_async(GetArmStatus.Request()).add_done_callback(self._capture_done)
 
     def _capture_done(self, future):
         self.status_request_in_flight = False
+        self._update_controls()
         try:
             response = future.result()
         except Exception as exc:
@@ -401,18 +446,23 @@ class MotionRecorderWindow(QMainWindow):
         current = [int(value) for value in response.current_pulse_us]
         opening = (GRIPPER_CLOSED_PULSE_US - current[0]) / (
             GRIPPER_CLOSED_PULSE_US - GRIPPER_OPEN_PULSE_US)
+        positions_deg = []
+        for index in range(1, len(JOINT_NAMES) + 1):
+            degrees = ((current[index] - 1500.0) / 1000.0) * 90.0
+            positions_deg.append(max(-JOINT_LIMIT_DEGREES, min(JOINT_LIMIT_DEGREES, degrees)))
+        self._set_pose_controls(positions_deg, opening)
+        moving = '运动中' if response.moving else '已停止'
+        self.status_label.setText(f'已读取 STM32 PWM 估计姿态: {moving}。')
+
+    def _set_pose_controls(self, positions_deg, opening):
         gripper_slider_blocker = QSignalBlocker(self.gripper_slider)
         gripper_spin_blocker = QSignalBlocker(self.gripper_spin)
         self.gripper_slider.setValue(round(max(0.0, min(1.0, opening)) * 100.0))
         self.gripper_spin.setValue(self.gripper_slider.value())
         del gripper_slider_blocker
         del gripper_spin_blocker
-        for index, joint_name in enumerate(JOINT_NAMES, start=1):
-            degrees = ((current[index] - 1500.0) / 1000.0) * 90.0
-            self.angle_controls[joint_name].set_value_degrees(
-                max(-JOINT_LIMIT_DEGREES, min(JOINT_LIMIT_DEGREES, degrees)))
-        moving = '运动中' if response.moving else '已停止'
-        self.status_label.setText(f'已读取 STM32 PWM 估计姿态: {moving}。')
+        for joint_name, degrees in zip(JOINT_NAMES, positions_deg):
+            self.angle_controls[joint_name].set_value_degrees(degrees)
 
     def _emergency_stop(self):
         if not self.node.estop_client.service_is_ready():
@@ -420,6 +470,9 @@ class MotionRecorderWindow(QMainWindow):
             return
         self.playback_generation += 1
         self.playback_active = False
+        self.reset_active = False
+        self.playback_stages = []
+        self.playback_stage_index = 0
         self.pending_joints.clear()
         self.pending_gripper = False
         self.live_timer.stop()
@@ -434,84 +487,185 @@ class MotionRecorderWindow(QMainWindow):
             self.status_label.setText(f'急停服务失败: {exc}')
 
     def _play_all(self):
-        if not self.keyframes or self.playback_active or self.live_request_in_flight:
+        if not self.keyframes or not self._can_start_staged_motion():
             return
         self.playback_index = 0
         self.playback_active = True
+        self.reset_active = False
         self.playback_generation += 1
         self._update_controls()
-        self._play_next(self.playback_generation, False)
+        self._play_next_keyframe(self.playback_generation, False)
 
     def _play_selected(self):
         row = self.table.currentRow()
-        if row < 0 or self.playback_active or self.live_request_in_flight:
+        if row < 0 or not self._can_start_staged_motion():
             return
         self.playback_index = row
         self.playback_active = True
+        self.reset_active = False
         self.playback_generation += 1
         self._update_controls()
-        self._play_next(self.playback_generation, True)
+        self._play_next_keyframe(self.playback_generation, True)
 
-    def _play_next(self, generation, stop_after_one):
+    def _reset_to_zero(self):
+        if not self._can_start_staged_motion():
+            return
+        duration_ms = self.duration_spin.value()
+        self.playback_active = True
+        self.reset_active = True
+        self.playback_generation += 1
+        self.playback_stages = [
+            MotionStage('joints', '底座复位', duration_ms, ('joint_6',), (0.0,)),
+            MotionStage('joints', '肩肘复位', duration_ms, ('joint_5', 'joint_4'), (0.0, 0.0)),
+            MotionStage('joints', '腕部复位', duration_ms, ('joint_3', 'joint_2'), (0.0, 0.0)),
+            MotionStage('gripper', '夹爪闭合', duration_ms, opening=0.0),
+        ]
+        self.playback_stage_index = 0
+        self._update_controls()
+        self._play_current_stage(self.playback_generation)
+
+    def _can_start_staged_motion(self):
+        if self.playback_active:
+            return False
+        if self.status_request_in_flight or self.live_request_in_flight or \
+          self.pending_joints or self.pending_gripper:
+            self.status_label.setText('请等待实时目标发送完成后再执行动作组或复位。')
+            return False
+        return True
+
+    def _build_keyframe_stages(self, keyframe):
+        if keyframe.execution_mode == EXECUTION_MODE_SYNCHRONIZED:
+            return [MotionStage(
+                'pose', '同步姿态', keyframe.duration_ms,
+                positions_deg=tuple(keyframe.positions_deg), opening=keyframe.opening)]
+
+        positions = dict(zip(JOINT_NAMES, keyframe.positions_deg))
+        stages = []
+        if keyframe.gripper_timing == GRIPPER_TIMING_BEFORE:
+            stages.append(MotionStage(
+                'gripper', '夹爪前执行', keyframe.duration_ms, opening=keyframe.opening))
+        stages.extend([
+            MotionStage('joints', '底座', keyframe.duration_ms, ('joint_6',), (positions['joint_6'],)),
+            MotionStage(
+                'joints', '肩部和肘部', keyframe.duration_ms,
+                ('joint_5', 'joint_4'), (positions['joint_5'], positions['joint_4'])),
+            MotionStage(
+                'joints', '腕部', keyframe.duration_ms,
+                ('joint_3', 'joint_2'), (positions['joint_3'], positions['joint_2'])),
+        ])
+        if keyframe.gripper_timing == GRIPPER_TIMING_AFTER:
+            stages.append(MotionStage(
+                'gripper', '夹爪后执行', keyframe.duration_ms, opening=keyframe.opening))
+        return stages
+
+    def _play_next_keyframe(self, generation, stop_after_one):
         if generation != self.playback_generation or not self.playback_active:
             return
         if self.playback_index >= len(self.keyframes):
-            self.playback_active = False
-            self._update_controls()
-            self.status_label.setText('动作组回放完成。')
-            return
-        if not self.node.pose_client.service_is_ready():
-            self.playback_active = False
-            self._update_controls()
-            self.status_label.setText('等待 /learm_driver/move_pose 服务...')
+            self._finish_staged_motion('动作组回放完成。')
             return
 
         keyframe = self.keyframes[self.playback_index]
         self.table.selectRow(self.playback_index)
-        request = MovePose.Request()
-        request.opening = keyframe.opening
-        request.positions_rad = [math.radians(value) for value in keyframe.positions_deg]
-        request.duration_ms = keyframe.duration_ms
-        self.node.pose_client.call_async(request).add_done_callback(
-            lambda future: self._play_pose_done(future, generation, stop_after_one, keyframe.duration_ms))
+        self.playback_stages = self._build_keyframe_stages(keyframe)
+        self.playback_stage_index = 0
+        self.playback_stop_after_one = stop_after_one
+        self._play_current_stage(generation)
 
-    def _play_pose_done(self, future, generation, stop_after_one, duration_ms):
+    def _play_current_stage(self, generation):
+        if generation != self.playback_generation or not self.playback_active:
+            return
+        if self.playback_stage_index >= len(self.playback_stages):
+            self._advance_after_keyframe(generation)
+            return
+
+        stage = self.playback_stages[self.playback_stage_index]
+        self.status_label.setText(f'执行阶段：{stage.label}。')
+        if stage.kind == 'pose':
+            if not self.node.pose_client.service_is_ready():
+                self._playback_failed('等待 /learm_driver/move_pose 服务...')
+                return
+            request = MovePose.Request()
+            request.opening = stage.opening
+            request.positions_rad = [math.radians(value) for value in stage.positions_deg]
+            request.duration_ms = stage.duration_ms
+            future = self.node.pose_client.call_async(request)
+        elif stage.kind == 'joints':
+            if not self.node.move_client.service_is_ready():
+                self._playback_failed('等待 /learm_driver/move_joints 服务...')
+                return
+            request = MoveJoints.Request()
+            request.joint_names = list(stage.joint_names)
+            request.positions_rad = [math.radians(value) for value in stage.positions_deg]
+            request.duration_ms = stage.duration_ms
+            future = self.node.move_client.call_async(request)
+        else:
+            if not self.node.gripper_client.service_is_ready():
+                self._playback_failed('等待 /learm_driver/set_gripper 服务...')
+                return
+            request = SetGripper.Request()
+            request.opening = stage.opening
+            request.duration_ms = stage.duration_ms
+            future = self.node.gripper_client.call_async(request)
+        future.add_done_callback(lambda result: self._play_stage_done(result, generation, stage))
+
+    def _play_stage_done(self, future, generation, stage):
         if generation != self.playback_generation or not self.playback_active:
             return
         try:
             response = future.result()
         except Exception as exc:
-            self._playback_failed(f'关键帧命令失败: {exc}')
+            self._playback_failed(f'{stage.label} 命令失败: {exc}')
             return
         if not response.success:
-            self._playback_failed(
-                f'关键帧被拒绝 ({response.error_code}): {response.message}')
+            self._playback_failed(f'{stage.label} 被拒绝 ({response.error_code}): {response.message}')
             return
 
         def advance():
             if generation != self.playback_generation or not self.playback_active:
                 return
-            self.playback_index += 1
-            if stop_after_one:
-                self.playback_active = False
-                self._update_controls()
-                self.status_label.setText('所选关键帧回放完成。')
-                return
-            self._play_next(generation, False)
+            self.playback_stage_index += 1
+            self._play_current_stage(generation)
 
-        QTimer.singleShot(duration_ms + 20, advance)
+        QTimer.singleShot(stage.duration_ms + 20, advance)
 
-    def _playback_failed(self, message):
+    def _advance_after_keyframe(self, generation):
+        if self.reset_active:
+            self._set_pose_controls([0.0] * len(JOINT_NAMES), 0.0)
+            self._finish_staged_motion('复位完成：joint_2 至 joint_6 已回到零位，夹爪已闭合。')
+            return
+
+        self.playback_index += 1
+        if self.playback_stop_after_one:
+            self._finish_staged_motion('所选关键帧回放完成。')
+            return
+        self._play_next_keyframe(generation, False)
+
+    def _finish_staged_motion(self, message):
         self.playback_active = False
+        self.reset_active = False
+        self.playback_stages = []
+        self.playback_stage_index = 0
         self._update_controls()
         self.status_label.setText(message)
+
+    def _playback_failed(self, message):
+        self._finish_staged_motion(message)
 
     def _refresh_table(self, selected_row=None):
         self.table.setRowCount(len(self.keyframes))
         for row, keyframe in enumerate(self.keyframes):
+            mode = '同步' if keyframe.execution_mode == EXECUTION_MODE_SYNCHRONIZED else '安全顺序'
+            gripper_timing = {
+                GRIPPER_TIMING_BEFORE: '前执行',
+                GRIPPER_TIMING_AFTER: '后执行',
+                GRIPPER_TIMING_NONE: '不动作',
+            }[keyframe.gripper_timing]
             values = [
                 str(row + 1),
                 f'{keyframe.duration_ms} ms',
+                mode,
+                gripper_timing,
                 f'{keyframe.opening * 100.0:.0f} %',
                 *[f'{value:.1f} deg' for value in keyframe.positions_deg],
             ]
@@ -575,7 +729,8 @@ class MotionRecorderWindow(QMainWindow):
             return
         try:
             document = json.loads(Path(filename).read_text(encoding='utf-8'))
-            if document.get('format_version') != RECORDING_FORMAT_VERSION or \
+            format_version = document.get('format_version')
+            if format_version not in (1, RECORDING_FORMAT_VERSION) or \
               document.get('joint_names') != list(JOINT_NAMES):
                 raise ValueError('动作文件与当前关节配置不兼容')
             keyframes = []
@@ -584,11 +739,16 @@ class MotionRecorderWindow(QMainWindow):
                     duration_ms=int(item['duration_ms']),
                     opening=float(item['opening']),
                     positions_deg=[float(value) for value in item['positions_deg']],
+                    execution_mode=item.get('execution_mode', EXECUTION_MODE_SYNCHRONIZED),
+                    gripper_timing=item.get('gripper_timing', GRIPPER_TIMING_AFTER),
                 )
                 if keyframe.duration_ms < MIN_DURATION_MS or keyframe.duration_ms > MAX_DURATION_MS or \
                   not 0.0 <= keyframe.opening <= 1.0 or \
                   len(keyframe.positions_deg) != len(JOINT_NAMES) or \
-                  any(abs(value) > JOINT_LIMIT_DEGREES for value in keyframe.positions_deg):
+                  any(abs(value) > JOINT_LIMIT_DEGREES for value in keyframe.positions_deg) or \
+                  keyframe.execution_mode not in (EXECUTION_MODE_SYNCHRONIZED, EXECUTION_MODE_SEQUENCED) or \
+                  keyframe.gripper_timing not in (
+                      GRIPPER_TIMING_BEFORE, GRIPPER_TIMING_AFTER, GRIPPER_TIMING_NONE):
                     raise ValueError('动作文件含有超出当前安全范围的关键帧')
                 keyframes.append(keyframe)
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
@@ -607,7 +767,12 @@ class MotionRecorderWindow(QMainWindow):
         self.gripper_spin.setEnabled(editable)
         self.duration_slider.setEnabled(editable)
         self.duration_spin.setEnabled(editable)
+        self.execution_mode_combo.setEnabled(editable)
+        self.gripper_timing_combo.setEnabled(editable)
         self.add_button.setEnabled(editable)
+        self.reset_button.setEnabled(
+            editable and not self.status_request_in_flight and not self.live_request_in_flight and
+            not self.pending_joints and not self.pending_gripper)
         self.capture_button.setEnabled(editable and not self.live_request_in_flight)
         self.replace_button.setEnabled(editable and selected >= 0)
         self.delete_button.setEnabled(editable and selected >= 0)
