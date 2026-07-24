@@ -30,8 +30,8 @@ outside the staged motion. The table supports replacement, deletion, reordering,
 JSON save/load, and selected or full playback.
 
 `复位到零位` moves `joint_6`, `joint_5 + joint_4`, and `joint_3 + joint_2` to
-0 degrees in that order, then fully closes the gripper. Each stage uses the
-current action-time setting.
+0 degrees in that order, then fully closes the gripper. Each stage takes
+2 seconds.
 
 The GUI shows target values and can read STM32 PWM estimates, but it does not
 provide physical encoder feedback.

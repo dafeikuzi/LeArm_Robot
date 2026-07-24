@@ -34,6 +34,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define LEARM_SERVO_UPDATE_MS  20U
+#define LEARM_PWM_TICK_HZ      1000000U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -57,6 +58,7 @@ static void MX_GPIO_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_USART1_UART_Init(void);
+static uint32_t LeArm_GetApb1TimerPrescaler(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -121,6 +123,25 @@ int main(void)
   /* USER CODE END 3 */
 }
 
+static uint32_t LeArm_GetApb1TimerPrescaler(void)
+{
+  uint32_t timerClockHz = HAL_RCC_GetPCLK1Freq();
+
+  /* STM32F1 timers run at twice PCLK1 whenever APB1 is prescaled. */
+  if ((RCC->CFGR & RCC_CFGR_PPRE1) != 0U)
+  {
+    timerClockHz *= 2U;
+  }
+
+  if ((timerClockHz < LEARM_PWM_TICK_HZ) ||
+    ((timerClockHz % LEARM_PWM_TICK_HZ) != 0U))
+  {
+    Error_Handler();
+  }
+
+  return (timerClockHz / LEARM_PWM_TICK_HZ) - 1U;
+}
+
 /**
   * @brief System Clock Configuration
   * @retval None
@@ -142,7 +163,30 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
-    Error_Handler();
+    /* Keep the PWM outputs available on boards with a missing or failed HSE. */
+    RCC_OscInitStruct = (RCC_OscInitTypeDef){0};
+    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE | RCC_OSCILLATORTYPE_HSI;
+    RCC_OscInitStruct.HSEState = RCC_HSE_OFF;
+    RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+    RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_OFF;
+    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    RCC_ClkInitStruct = (RCC_ClkInitTypeDef){0};
+    RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
+      RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+    RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+    RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+    {
+      Error_Handler();
+    }
+    return;
   }
   /** Initializes the CPU, AHB and APB buses clocks
   */
@@ -179,7 +223,7 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 35;
+  htim3.Init.Prescaler = LeArm_GetApb1TimerPrescaler();
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 19999;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -250,7 +294,7 @@ static void MX_TIM4_Init(void)
 
   /* USER CODE END TIM4_Init 1 */
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 35;
+  htim4.Init.Prescaler = LeArm_GetApb1TimerPrescaler();
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim4.Init.Period = 19999;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;

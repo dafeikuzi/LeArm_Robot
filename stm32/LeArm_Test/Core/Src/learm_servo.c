@@ -125,11 +125,6 @@ void LeArm_ServoInit(void)
   {
     uint32_t initialPositionQ15 = LeArm_PulseToQ15(servoInitialPulseUs[id]);
 
-    if (HAL_TIM_PWM_Start(servoOutputs[id].timer, servoOutputs[id].channel) != HAL_OK)
-    {
-      Error_Handler();
-    }
-
     servoStartPositionQ15[id] = initialPositionQ15;
     servoCurrentPositionQ15[id] = initialPositionQ15;
     servoTargetPositionQ15[id] = initialPositionQ15;
@@ -141,6 +136,12 @@ void LeArm_ServoInit(void)
     servoStep[id] = 0U;
     servoMoving[id] = 0U;
     LeArm_ServoApply(id);
+
+    /* Apply the neutral pulse before enabling the output channel. */
+    if (HAL_TIM_PWM_Start(servoOutputs[id].timer, servoOutputs[id].channel) != HAL_OK)
+    {
+      Error_Handler();
+    }
   }
 }
 

@@ -42,6 +42,7 @@ GRIPPER_CLOSED_PULSE_US = 1400.0
 LIVE_SEND_INTERVAL_MS = 100
 MIN_DURATION_MS = 200
 MAX_DURATION_MS = 1000
+RESET_DURATION_MS = 2000
 RECORDING_FORMAT_VERSION = 2
 EXECUTION_MODE_SYNCHRONIZED = 'synchronized'
 EXECUTION_MODE_SEQUENCED = 'sequenced'
@@ -510,7 +511,7 @@ class MotionRecorderWindow(QMainWindow):
     def _reset_to_zero(self):
         if not self._can_start_staged_motion():
             return
-        duration_ms = self.duration_spin.value()
+        duration_ms = RESET_DURATION_MS
         self.playback_active = True
         self.reset_active = True
         self.playback_generation += 1
