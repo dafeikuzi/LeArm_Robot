@@ -9,6 +9,7 @@ extern "C" {
 
 void LeArm_ProtocolInit(UART_HandleTypeDef *huart);
 void LeArm_ProtocolTask(void);
+void LeArm_ProtocolSendAngleReport(void);
 
 #ifdef __cplusplus
 }

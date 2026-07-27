@@ -4,3 +4,4 @@ serial_controller:
     baud_rate: 9600
     auto_connect: true
     read_period_ms: 20
+    log_received_text: true

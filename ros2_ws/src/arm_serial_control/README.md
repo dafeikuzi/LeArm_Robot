@@ -21,5 +21,11 @@ ros2 run arm_serial_control serial_controller --ros-args \
 
 The node exposes `connect`, `disconnect`, and `send_hex` services. Received
 bytes are published on `/serial_controller/received_hex` as uppercase
-hexadecimal text. Application nodes should use the protocol-aware
-`learm_driver` package instead of sending device frames directly.
+hexadecimal text. Printable serial lines, such as the STM32 angle report, are
+also published on `/serial_controller/received_text`. Application nodes should
+use the protocol-aware `learm_driver` package instead of sending device frames
+directly.
+
+```bash
+ros2 topic echo /serial_controller/received_text
+```

@@ -1,6 +1,7 @@
 #include "learm_protocol.h"
 
 #include "learm_servo.h"
+#include <stdio.h>
 #include <string.h>
 
 #define LEARM_FRAME_HEADER_1      0xA5U
@@ -249,6 +250,23 @@ static uint8_t LeArm_ProtocolSendFrame(uint8_t sequence, uint8_t command,
   return 1U;
 }
 
+static uint8_t LeArm_ProtocolSendRaw(const uint8_t *data, uint8_t length)
+{
+  uint8_t nextHead;
+
+  if ((protocolUart == 0) || (data == 0) || (length == 0U) ||
+    (length > LEARM_FRAME_MAX_LEN) || (LeArm_ProtocolCanQueueTx() == 0U))
+  {
+    return 0U;
+  }
+
+  memcpy(txFrameQueue[txFrameQueueHead], data, length);
+  txFrameQueueLength[txFrameQueueHead] = length;
+  nextHead = (uint8_t)((txFrameQueueHead + 1U) % LEARM_TX_FRAME_QUEUE_SIZE);
+  txFrameQueueHead = nextHead;
+  return 1U;
+}
+
 static void LeArm_ProtocolSendAck(uint8_t sequence, uint8_t requestCommand, uint8_t status)
 {
   uint8_t payload[2] = {requestCommand, status};
@@ -277,6 +295,38 @@ static void LeArm_ProtocolSendStatus(uint8_t sequence)
     LeArm_WriteU16(&payload[14U + ((id - 1U) * 2U)], LeArm_ServoGetTargetPulse(id));
   }
   LeArm_ProtocolSendFrame(sequence, LEARM_CMD_STATUS, payload, sizeof(payload));
+}
+
+static int16_t LeArm_ProtocolPulseToDegrees(uint16_t pulseUs)
+{
+  int32_t numerator = ((int32_t)pulseUs - 1500L) * 90L;
+
+  if (numerator >= 0L)
+  {
+    return (int16_t)((numerator + 500L) / 1000L);
+  }
+  return (int16_t)((numerator - 500L) / 1000L);
+}
+
+void LeArm_ProtocolSendAngleReport(void)
+{
+  char message[64];
+  int length;
+
+  length = snprintf(message, sizeof(message),
+    "ANG J1=%d J2=%d J3=%d J4=%d J5=%d J6=%d deg\r\n",
+    LeArm_ProtocolPulseToDegrees(LeArm_ServoGetCurrentPulse(1U)),
+    LeArm_ProtocolPulseToDegrees(LeArm_ServoGetCurrentPulse(2U)),
+    LeArm_ProtocolPulseToDegrees(LeArm_ServoGetCurrentPulse(3U)),
+    LeArm_ProtocolPulseToDegrees(LeArm_ServoGetCurrentPulse(4U)),
+    LeArm_ProtocolPulseToDegrees(LeArm_ServoGetCurrentPulse(5U)),
+    LeArm_ProtocolPulseToDegrees(LeArm_ServoGetCurrentPulse(6U)));
+  if ((length <= 0) || (length >= (int)sizeof(message)))
+  {
+    return;
+  }
+
+  (void)LeArm_ProtocolSendRaw((const uint8_t *)message, (uint8_t)length);
 }
 
 static uint8_t LeArm_ProtocolHandleMovePulses(const uint8_t *payload, uint8_t payloadLength)

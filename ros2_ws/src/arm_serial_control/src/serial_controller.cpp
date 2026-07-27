@@ -88,8 +88,10 @@ public:
     baud_rate_ = declare_parameter<int>("baud_rate", 9600);
     const auto auto_connect = declare_parameter<bool>("auto_connect", false);
     const auto read_period_ms = declare_parameter<int>("read_period_ms", 20);
+    log_received_text_ = declare_parameter<bool>("log_received_text", true);
 
     received_publisher_ = create_publisher<std_msgs::msg::String>("~/received_hex", 10);
+    received_text_publisher_ = create_publisher<std_msgs::msg::String>("~/received_text", 10);
     connect_service_ = create_service<std_srvs::srv::Trigger>(
       "~/connect",
       [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
@@ -263,6 +265,46 @@ private:
       std_msgs::msg::String message;
       message.data = bytes_to_hex(buffer, static_cast<std::size_t>(count));
       received_publisher_->publish(message);
+      publish_received_text(buffer, static_cast<std::size_t>(count));
+    }
+  }
+
+  void publish_received_text(const uint8_t * bytes, const std::size_t count)
+  {
+    for (std::size_t index = 0; index < count; ++index) {
+      const auto character = static_cast<char>(bytes[index]);
+      const bool line_break = character == '\n';
+      const bool printable = std::isprint(static_cast<unsigned char>(character)) ||
+        character == '\r' || character == '\t' || line_break;
+
+      if (!printable) {
+        received_text_buffer_.clear();
+        continue;
+      }
+
+      if (character != '\r') {
+        received_text_buffer_ += character;
+      }
+
+      if (received_text_buffer_.size() > 256) {
+        received_text_buffer_.clear();
+        continue;
+      }
+
+      if (line_break) {
+        if (!received_text_buffer_.empty() && received_text_buffer_.back() == '\n') {
+          received_text_buffer_.pop_back();
+        }
+        if (!received_text_buffer_.empty()) {
+          std_msgs::msg::String message;
+          message.data = received_text_buffer_;
+          received_text_publisher_->publish(message);
+          if (log_received_text_) {
+            RCLCPP_INFO(get_logger(), "Serial text: %s", received_text_buffer_.c_str());
+          }
+        }
+        received_text_buffer_.clear();
+      }
     }
   }
 
@@ -270,7 +312,10 @@ private:
   int baud_rate_;
   int serial_fd_;
   std::string last_error_;
+  bool log_received_text_{};
+  std::string received_text_buffer_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr received_publisher_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr received_text_publisher_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr connect_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr disconnect_service_;
   rclcpp::Service<arm_serial_control::srv::SendHex>::SharedPtr send_service_;
