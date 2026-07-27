@@ -1,0 +1,12 @@
+---
+bool success
+uint8 error_code
+bool valid
+bool magnet_detected
+bool magnet_too_weak
+bool magnet_too_strong
+uint8 status
+uint16 raw_angle
+float64 angle_rad
+float64 angle_deg
+string message

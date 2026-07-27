@@ -22,6 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "learm_as5600.h"
 #include "learm_protocol.h"
 #include "learm_servo.h"
 /* USER CODE END Includes */
@@ -33,6 +34,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define LEARM_AS5600_UPDATE_MS 50U
 #define LEARM_SERVO_UPDATE_MS  20U
 #define LEARM_PWM_TICK_HZ      1000000U
 /* USER CODE END PD */
@@ -75,6 +77,7 @@ static uint32_t LeArm_GetApb1TimerPrescaler(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+  uint32_t lastAs5600Tick;
   uint32_t lastServoTick;
   /* USER CODE END 1 */
 
@@ -100,8 +103,10 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
+  LeArm_As5600Init();
   LeArm_ServoInit();
   LeArm_ProtocolInit(&huart1);
+  lastAs5600Tick = HAL_GetTick();
   lastServoTick = HAL_GetTick();
   /* USER CODE END 2 */
 
@@ -113,6 +118,12 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     LeArm_ProtocolTask();
+
+    if ((uint32_t)(HAL_GetTick() - lastAs5600Tick) >= LEARM_AS5600_UPDATE_MS)
+    {
+      lastAs5600Tick += LEARM_AS5600_UPDATE_MS;
+      LeArm_As5600Task();
+    }
 
     if ((uint32_t)(HAL_GetTick() - lastServoTick) >= LEARM_SERVO_UPDATE_MS)
     {

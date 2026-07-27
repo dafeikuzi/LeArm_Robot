@@ -21,6 +21,7 @@
 #include "learm_driver/srv/calibration_move_pwm.hpp"
 #include "learm_driver/protocol.hpp"
 #include "learm_driver/srv/get_arm_status.hpp"
+#include "learm_driver/srv/get_encoder.hpp"
 #include "learm_driver/srv/move_joints.hpp"
 #include "learm_driver/srv/move_pose.hpp"
 #include "learm_driver/srv/set_gripper.hpp"
@@ -32,7 +33,9 @@ constexpr uint32_t kMinimumMoveTimeMs = 20;
 constexpr uint32_t kMaximumMoveTimeMs = 30000;
 constexpr std::size_t kServoCount = 6;
 constexpr std::size_t kStatusPayloadSize = 26;
+constexpr std::size_t kEncoderPayloadSize = 4;
 constexpr double kPositionToleranceRad = 1e-9;
+constexpr double kTwoPi = 6.28318530717958647692;
 
 struct JointCalibration
 {
@@ -121,6 +124,9 @@ public:
     status_service_ = create_service<learm_driver::srv::GetArmStatus>(
       "~/get_status",
       std::bind(&LeArmDriver::get_status_callback, this, std::placeholders::_1, std::placeholders::_2));
+    encoder_service_ = create_service<learm_driver::srv::GetEncoder>(
+      "~/get_encoder",
+      std::bind(&LeArmDriver::get_encoder_callback, this, std::placeholders::_1, std::placeholders::_2));
     estop_service_ = create_service<std_srvs::srv::Trigger>(
       "~/emergency_stop",
       std::bind(&LeArmDriver::emergency_stop_callback, this, std::placeholders::_1, std::placeholders::_2));
@@ -504,6 +510,43 @@ private:
     response->message = "status received from STM32";
   }
 
+  void get_encoder_callback(
+    const std::shared_ptr<learm_driver::srv::GetEncoder::Request>,
+    std::shared_ptr<learm_driver::srv::GetEncoder::Response> response)
+  {
+    std::string error;
+    uint8_t error_code = learm_driver::kStatusOk;
+    learm_driver::Frame frame;
+    if (!send_transaction(learm_driver::kCommandGetEncoder, {}, learm_driver::kCommandEncoderStatus,
+        frame, error_code, error))
+    {
+      response->success = false;
+      response->error_code = error_code;
+      response->message = error;
+      return;
+    }
+    if (frame.payload.size() != kEncoderPayloadSize) {
+      response->success = false;
+      response->error_code = learm_driver::kStatusInvalidPayload;
+      response->message = "STM32 returned an invalid encoder payload";
+      return;
+    }
+
+    response->valid = (frame.payload[0] & 0x01U) != 0U;
+    response->status = frame.payload[1];
+    response->magnet_detected = (response->status & 0x20U) != 0U;
+    response->magnet_too_weak = (response->status & 0x10U) != 0U;
+    response->magnet_too_strong = (response->status & 0x08U) != 0U;
+    response->raw_angle = static_cast<uint16_t>(read_u16_le(frame.payload, 2) & 0x0FFFU);
+    response->angle_rad = static_cast<double>(response->raw_angle) * kTwoPi / 4096.0;
+    response->angle_deg = static_cast<double>(response->raw_angle) * 360.0 / 4096.0;
+    response->success = response->valid;
+    response->error_code = response->valid ? learm_driver::kStatusOk :
+      learm_driver::kStatusSensorUnavailable;
+    response->message = response->valid ? "AS5600 encoder status received from STM32" :
+      "AS5600 encoder data is not valid yet";
+  }
+
   void calibration_move_callback(
     const std::shared_ptr<learm_driver::srv::CalibrationMovePwm::Request> request,
     std::shared_ptr<learm_driver::srv::CalibrationMovePwm::Response> response)
@@ -799,6 +842,7 @@ private:
   rclcpp::Service<learm_driver::srv::CalibrationMovePwm>::SharedPtr calibration_move_service_;
   rclcpp::Service<learm_driver::srv::SetGripper>::SharedPtr gripper_service_;
   rclcpp::Service<learm_driver::srv::GetArmStatus>::SharedPtr status_service_;
+  rclcpp::Service<learm_driver::srv::GetEncoder>::SharedPtr encoder_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr estop_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_estop_service_;
 };

@@ -73,6 +73,10 @@ void Error_Handler(void);
 #define servo6_Pin GPIO_PIN_13
 #define servo6_GPIO_Port GPIOD
 /* USER CODE BEGIN Private defines */
+#define as5600_scl_Pin GPIO_PIN_6
+#define as5600_scl_GPIO_Port GPIOB
+#define as5600_sda_Pin GPIO_PIN_7
+#define as5600_sda_GPIO_Port GPIOB
 
 /* USER CODE END Private defines */
 

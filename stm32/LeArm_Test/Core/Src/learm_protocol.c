@@ -1,5 +1,6 @@
 #include "learm_protocol.h"
 
+#include "learm_as5600.h"
 #include "learm_servo.h"
 #include <string.h>
 
@@ -16,8 +17,10 @@
 #define LEARM_CMD_GET_STATUS      0x11U
 #define LEARM_CMD_EMERGENCY_STOP  0x12U
 #define LEARM_CMD_CLEAR_ESTOP     0x13U
+#define LEARM_CMD_GET_ENCODER     0x14U
 #define LEARM_CMD_ACK             0x80U
 #define LEARM_CMD_STATUS          0x81U
+#define LEARM_CMD_ENCODER_STATUS  0x82U
 
 #define LEARM_STATUS_OK                 0U
 #define LEARM_STATUS_UNSUPPORTED_COMMAND 2U
@@ -279,6 +282,18 @@ static void LeArm_ProtocolSendStatus(uint8_t sequence)
   LeArm_ProtocolSendFrame(sequence, LEARM_CMD_STATUS, payload, sizeof(payload));
 }
 
+static void LeArm_ProtocolSendEncoderStatus(uint8_t sequence)
+{
+  uint8_t payload[4];
+  uint16_t rawAngle;
+  uint8_t status;
+
+  payload[0] = LeArm_As5600GetLatest(&rawAngle, &status);
+  payload[1] = status;
+  LeArm_WriteU16(&payload[2], rawAngle);
+  LeArm_ProtocolSendFrame(sequence, LEARM_CMD_ENCODER_STATUS, payload, sizeof(payload));
+}
+
 static uint8_t LeArm_ProtocolHandleMovePulses(const uint8_t *payload, uint8_t payloadLength)
 {
   uint16_t moveTime;
@@ -408,6 +423,17 @@ static void LeArm_ProtocolHandleFrame(const uint8_t *frame, uint8_t frameLength)
       {
         estopActive = 0U;
         LeArm_ProtocolSendAck(sequence, command, LEARM_STATUS_OK);
+      }
+      else
+      {
+        LeArm_ProtocolSendAck(sequence, command, LEARM_STATUS_INVALID_PAYLOAD);
+      }
+      break;
+
+    case LEARM_CMD_GET_ENCODER:
+      if (payloadLength == 0U)
+      {
+        LeArm_ProtocolSendEncoderStatus(sequence);
       }
       else
       {

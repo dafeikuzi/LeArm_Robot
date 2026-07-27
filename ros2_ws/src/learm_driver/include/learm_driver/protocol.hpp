@@ -18,8 +18,10 @@ constexpr uint8_t kCommandMovePulses = 0x10;
 constexpr uint8_t kCommandGetStatus = 0x11;
 constexpr uint8_t kCommandEmergencyStop = 0x12;
 constexpr uint8_t kCommandClearEstop = 0x13;
+constexpr uint8_t kCommandGetEncoder = 0x14;
 constexpr uint8_t kCommandAck = 0x80;
 constexpr uint8_t kCommandStatus = 0x81;
+constexpr uint8_t kCommandEncoderStatus = 0x82;
 
 constexpr uint8_t kStatusOk = 0;
 constexpr uint8_t kStatusInvalidPayload = 3;
@@ -28,6 +30,7 @@ constexpr uint8_t kStatusTransportError = 100;
 constexpr uint8_t kStatusTimeout = 101;
 constexpr uint8_t kStatusCalibrationDisabled = 102;
 constexpr uint8_t kStatusCalibrationInvalid = 103;
+constexpr uint8_t kStatusSensorUnavailable = 104;
 
 struct Frame
 {
