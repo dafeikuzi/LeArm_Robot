@@ -30,8 +30,6 @@ Services:
 - `/learm_driver/set_gripper`: commands `joint_1` as a gripper, where
   `opening: 0.0` is fully closed and `opening: 1.0` is fully open.
 - `/learm_driver/get_status`: returns the STM32 estimated current and target PWM values.
-- `/learm_driver/get_encoder`: returns the single AS5600 test sensor's latest
-  raw angle, converted angle, and magnet status flags.
 - `/learm_driver/emergency_stop`: freezes PWM interpolation and latches software stop.
 - `/learm_driver/clear_estop`: permits later movement commands.
 - `/learm_driver/calibration_move_pwm`: moves one servo by PWM for preliminary
@@ -48,12 +46,4 @@ driver with `calibration_mode_enabled:=true` and run:
 
 ```bash
 ros2 run learm_calibration_gui learm_calibration_gui
-```
-
-For the first AS5600 I2C feedback test, wire the sensor to the STM32 software
-I2C pins: `SCL -> PB6`, `SDA -> PB7`, `VCC -> 3.3 V`, and `GND -> GND`.
-Read it from ROS with:
-
-```bash
-ros2 service call /learm_driver/get_encoder learm_driver/srv/GetEncoder
 ```

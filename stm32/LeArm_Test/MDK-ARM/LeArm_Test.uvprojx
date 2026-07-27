@@ -416,11 +416,6 @@
               <FileType>1</FileType>
               <FilePath>../Core/Src/learm_protocol.c</FilePath>
             </File>
-            <File>
-              <FileName>learm_as5600.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/learm_as5600.c</FilePath>
-            </File>
           </Files>
         </Group>
         <Group>
