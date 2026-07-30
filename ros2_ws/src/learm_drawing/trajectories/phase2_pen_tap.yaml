@@ -1,0 +1,22 @@
+format_version: 1
+name: phase2_pen_tap
+defaults:
+  duration_ms: 1000
+  wait_after_ms: 300
+  opening: 0.0
+steps:
+  - label: home
+    pose: home_pose
+    duration_ms: 1500
+  - label: hover center
+    pose: hover_center
+  - label: touch center
+    pose: touch_center
+    duration_ms: 800
+    wait_after_ms: 500
+  - label: lift center
+    pose: hover_center
+    duration_ms: 800
+  - label: return home
+    pose: home_pose
+    duration_ms: 1500

@@ -236,6 +236,8 @@ private:
           }
           response.success = false;
           response.message = "serial write failed: " + std::string(std::strerror(errno));
+          last_error_ = response.message;
+          disconnect();
           return;
         }
         if (written == 0) {
@@ -266,6 +268,10 @@ private:
       message.data = bytes_to_hex(buffer, static_cast<std::size_t>(count));
       received_publisher_->publish(message);
       publish_received_text(buffer, static_cast<std::size_t>(count));
+    } else if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+      last_error_ = "serial read failed: " + std::string(std::strerror(errno));
+      RCLCPP_WARN(get_logger(), "%s", last_error_.c_str());
+      disconnect();
     }
   }
 

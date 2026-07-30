@@ -36,10 +36,12 @@ from std_srvs.srv import Trigger
 
 
 JOINT_NAMES = ('joint_2', 'joint_3', 'joint_4', 'joint_5', 'joint_6')
+SERVO_NAMES = ('joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'joint_6')
 JOINT_LIMIT_DEGREES = 90.0
 GRIPPER_OPEN_PULSE_US = 500.0
 GRIPPER_CLOSED_PULSE_US = 1400.0
 LIVE_SEND_INTERVAL_MS = 100
+STATUS_POLL_INTERVAL_MS = 500
 MIN_DURATION_MS = 200
 MAX_DURATION_MS = 1000
 RESET_DURATION_MS = 2000
@@ -68,6 +70,11 @@ class MotionStage:
     joint_names: tuple[str, ...] = ()
     positions_deg: tuple[float, ...] = ()
     opening: float | None = None
+
+
+def pulse_to_estimated_degrees(pulse_us):
+    degrees = ((float(pulse_us) - 1500.0) / 1000.0) * JOINT_LIMIT_DEGREES
+    return max(-JOINT_LIMIT_DEGREES, min(JOINT_LIMIT_DEGREES, degrees))
 
 
 class RecorderClient(Node):
@@ -140,6 +147,7 @@ class MotionRecorderWindow(QMainWindow):
         self.last_live_send_time = 0.0
         self.flush_after_response = False
         self.status_request_in_flight = False
+        self.status_poll_request_in_flight = False
         self.playback_active = False
         self.playback_index = 0
         self.playback_generation = 0
@@ -159,6 +167,11 @@ class MotionRecorderWindow(QMainWindow):
         self.live_timer = QTimer(self)
         self.live_timer.setInterval(LIVE_SEND_INTERVAL_MS)
         self.live_timer.timeout.connect(self._dispatch_live_command)
+
+        self.status_poll_timer = QTimer(self)
+        self.status_poll_timer.setInterval(STATUS_POLL_INTERVAL_MS)
+        self.status_poll_timer.timeout.connect(self._poll_status)
+        self.status_poll_timer.start()
 
     def _build_ui(self):
         root = QWidget()
@@ -236,6 +249,22 @@ class MotionRecorderWindow(QMainWindow):
         pose_buttons.addWidget(self.estop_button)
         pose_layout.addRow(pose_buttons)
         layout.addWidget(pose_box)
+
+        live_angle_box = QGroupBox('实时 PWM 估算角度')
+        live_angle_layout = QGridLayout(live_angle_box)
+        self.live_angle_labels = {}
+        for index, servo_name in enumerate(SERVO_NAMES):
+            column = (index % 3) * 2
+            row = index // 3
+            name_label = QLabel(servo_name)
+            value_label = QLabel('--.- deg')
+            self.live_angle_labels[servo_name] = value_label
+            live_angle_layout.addWidget(name_label, row, column)
+            live_angle_layout.addWidget(value_label, row, column + 1)
+        self.live_angle_state_label = QLabel('等待 STM32 状态...')
+        self.live_angle_state_label.setWordWrap(True)
+        live_angle_layout.addWidget(self.live_angle_state_label, 2, 0, 1, 6)
+        layout.addWidget(live_angle_box)
 
         recording_box = QGroupBox('动作组关键帧')
         recording_layout = QVBoxLayout(recording_box)
@@ -421,7 +450,8 @@ class MotionRecorderWindow(QMainWindow):
         self.status_label.setText(f'已替换第 {row + 1} 个关键帧。')
 
     def _capture_status(self):
-        if self.status_request_in_flight or self.playback_active or self.live_request_in_flight or \
+        if self.status_request_in_flight or self.status_poll_request_in_flight or \
+          self.playback_active or self.live_request_in_flight or \
           self.pending_joints or self.pending_gripper:
             self.status_label.setText('请等待实时目标发送完成后再读取状态。')
             return
@@ -454,6 +484,41 @@ class MotionRecorderWindow(QMainWindow):
         self._set_pose_controls(positions_deg, opening)
         moving = '运动中' if response.moving else '已停止'
         self.status_label.setText(f'已读取 STM32 PWM 估计姿态: {moving}。')
+        self._update_live_angle_display(response)
+
+    def _poll_status(self):
+        if not rclpy.ok() or self.status_poll_request_in_flight or self.status_request_in_flight:
+            return
+        if self.live_request_in_flight or self.pending_joints or self.pending_gripper:
+            return
+        if not self.node.status_client.service_is_ready():
+            self.live_angle_state_label.setText('等待 /learm_driver/get_status...')
+            return
+        self.status_poll_request_in_flight = True
+        self.node.status_client.call_async(GetArmStatus.Request()).add_done_callback(self._poll_status_done)
+
+    def _poll_status_done(self, future):
+        self.status_poll_request_in_flight = False
+        try:
+            response = future.result()
+        except Exception as exc:
+            self.live_angle_state_label.setText(f'实时角度读取失败: {exc}')
+            return
+        if not response.success:
+            self.live_angle_state_label.setText(
+                f'实时角度读取失败 ({response.error_code}): {response.message}')
+            return
+        self._update_live_angle_display(response)
+
+    def _update_live_angle_display(self, response):
+        for index, servo_name in enumerate(SERVO_NAMES):
+            degrees = pulse_to_estimated_degrees(response.current_pulse_us[index])
+            target_degrees = pulse_to_estimated_degrees(response.target_pulse_us[index])
+            self.live_angle_labels[servo_name].setText(
+                f'{degrees:.1f} deg / 目标 {target_degrees:.1f} deg')
+        moving = '运动中' if response.moving else '已停止'
+        estop = '急停' if response.estop_active else '正常'
+        self.live_angle_state_label.setText(f'{moving}，{estop}，PWM 估算值。')
 
     def _set_pose_controls(self, positions_deg, opening):
         gripper_slider_blocker = QSignalBlocker(self.gripper_slider)
@@ -774,7 +839,8 @@ class MotionRecorderWindow(QMainWindow):
         self.reset_button.setEnabled(
             editable and not self.status_request_in_flight and not self.live_request_in_flight and
             not self.pending_joints and not self.pending_gripper)
-        self.capture_button.setEnabled(editable and not self.live_request_in_flight)
+        self.capture_button.setEnabled(
+            editable and not self.live_request_in_flight and not self.status_poll_request_in_flight)
         self.replace_button.setEnabled(editable and selected >= 0)
         self.delete_button.setEnabled(editable and selected >= 0)
         self.move_up_button.setEnabled(editable and selected > 0)
@@ -788,6 +854,7 @@ class MotionRecorderWindow(QMainWindow):
     def closeEvent(self, event):
         self.ros_timer.stop()
         self.live_timer.stop()
+        self.status_poll_timer.stop()
         event.accept()
 
 

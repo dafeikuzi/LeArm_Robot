@@ -1,0 +1,13 @@
+format_version: 1
+name: phase0_safety_check
+defaults:
+  duration_ms: 1500
+  wait_after_ms: 500
+  opening: 0.0
+steps:
+  - label: home
+    pose: home_pose
+  - label: hover center
+    pose: hover_center
+  - label: return home
+    pose: home_pose

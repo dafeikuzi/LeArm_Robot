@@ -25,6 +25,11 @@ Flag bit 0 means interpolation is active; bit 1 means software emergency stop
 is latched. Emergency stop freezes each current PWM and holds servo torque
 until a clear command is accepted.
 
+For `move pulses`, `duration_ms` is a requested time. The firmware enforces a
+minimum servo motion time of 1000 ms and may extend the actual interpolation
+time further to satisfy per-servo PWM step limits. The servo interpolation uses
+a quintic S-curve profile to reduce start/stop shock.
+
 The firmware also emits a plain-text angle estimate line every 200 ms on the
 same UART, for example `ANG J1=-27 J2=0 J3=0 J4=0 J5=0 J6=0 deg`. These are
 PWM-derived estimates using `1500 us = 0 deg` and `500..2500 us = -90..90 deg`;

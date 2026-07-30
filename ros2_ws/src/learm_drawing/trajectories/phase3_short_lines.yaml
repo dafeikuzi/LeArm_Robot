@@ -1,0 +1,35 @@
+format_version: 1
+name: phase3_short_lines
+defaults:
+  duration_ms: 1200
+  wait_after_ms: 250
+  opening: 0.0
+steps:
+  - label: home
+    pose: home_pose
+    duration_ms: 1500
+  - label: hover left
+    pose: hover_left
+  - label: pen down left
+    pose: touch_left
+    duration_ms: 800
+  - label: draw horizontal line
+    pose: touch_right
+    duration_ms: 1500
+  - label: pen up right
+    pose: hover_right
+    duration_ms: 800
+  - label: hover front
+    pose: hover_front
+  - label: pen down front
+    pose: touch_front
+    duration_ms: 800
+  - label: draw vertical line
+    pose: touch_back
+    duration_ms: 1500
+  - label: pen up back
+    pose: hover_back
+    duration_ms: 800
+  - label: return home
+    pose: home_pose
+    duration_ms: 1500

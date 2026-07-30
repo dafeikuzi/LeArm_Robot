@@ -1,0 +1,25 @@
+format_version: 1
+name: phase7_letters
+defaults:
+  duration_ms: 1000
+  wait_after_ms: 200
+  opening: 0.0
+steps:
+  - label: home
+    pose: home_pose
+    duration_ms: 1500
+  - label: letter L hover start
+    pose: hover_left_back
+  - label: letter L pen down
+    pose: touch_left_back
+    duration_ms: 800
+  - label: letter L vertical stroke
+    pose: touch_left_front
+  - label: letter L horizontal stroke
+    pose: touch_right_front
+  - label: letter L pen up
+    pose: hover_right_front
+    duration_ms: 800
+  - label: return home
+    pose: home_pose
+    duration_ms: 1500

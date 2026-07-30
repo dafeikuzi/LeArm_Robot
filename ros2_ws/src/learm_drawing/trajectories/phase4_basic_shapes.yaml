@@ -1,0 +1,29 @@
+format_version: 1
+name: phase4_basic_shapes
+defaults:
+  duration_ms: 1200
+  wait_after_ms: 200
+  opening: 0.0
+steps:
+  - label: home
+    pose: home_pose
+    duration_ms: 1500
+  - label: hover left front
+    pose: hover_left_front
+  - label: pen down left front
+    pose: touch_left_front
+    duration_ms: 800
+  - label: draw bottom edge
+    pose: touch_right_front
+  - label: draw right edge
+    pose: touch_right_back
+  - label: draw top edge
+    pose: touch_left_back
+  - label: close rectangle
+    pose: touch_left_front
+  - label: pen up left front
+    pose: hover_left_front
+    duration_ms: 800
+  - label: return home
+    pose: home_pose
+    duration_ms: 1500

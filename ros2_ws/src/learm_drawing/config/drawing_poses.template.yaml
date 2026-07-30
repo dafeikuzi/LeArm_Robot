@@ -1,0 +1,63 @@
+# Replace these placeholder angles with measured safe poses before running
+# dry_run:=false. Joint order is joint_2, joint_3, joint_4, joint_5, joint_6.
+format_version: 1
+requires_user_calibration: true
+default_opening: 0.0
+poses:
+  home_pose:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  hover_center:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  touch_center:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  hover_left:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  touch_left:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  hover_right:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  touch_right:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  hover_front:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  touch_front:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  hover_back:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  touch_back:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  hover_left_front:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  touch_left_front:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  hover_right_front:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  touch_right_front:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  hover_right_back:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  touch_right_back:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  hover_left_back:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
+  touch_left_back:
+    joints_deg: [0, 0, 0, 0, 0]
+    opening: 0.0
