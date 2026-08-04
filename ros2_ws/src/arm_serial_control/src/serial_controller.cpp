@@ -306,7 +306,7 @@ private:
           message.data = received_text_buffer_;
           received_text_publisher_->publish(message);
           if (log_received_text_) {
-            RCLCPP_INFO(get_logger(), "Serial text: %s", received_text_buffer_.c_str());
+            RCLCPP_DEBUG(get_logger(), "Serial text: %s", received_text_buffer_.c_str());
           }
         }
         received_text_buffer_.clear();

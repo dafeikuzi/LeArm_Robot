@@ -129,8 +129,26 @@ Run with a specific Linux camera device:
 ros2 run learm_vision color_tracker --ros-args -p camera_device:=/dev/video0
 ```
 
-The default camera format is `MJPG 320x240` because some VMware webcam devices
-open but time out in their default format. You can override it:
+The default camera format is `MJPG 1920x1080 @ 30fps`, which is the highest
+mode reported by the current webcam. The preview is displayed at `960x540`.
+You can override capture and preview sizes when needed:
+
+```bash
+ros2 run learm_vision color_tracker --ros-args \
+  -p camera_device:=/dev/video0 \
+  -p pixel_format:=MJPG \
+  -p frame_width:=1920 \
+  -p frame_height:=1080 \
+  -p fps:=30 \
+  -p preview_width:=960 \
+  -p preview_height:=540 \
+  -p processing_rate_hz:=30.0 \
+  -p publish_rate_hz:=5.0 \
+  -p read_timeout_ms:=1000
+```
+
+For smoother display in VMware, keep `show_mask` disabled unless you are tuning
+HSV thresholds:
 
 ```bash
 ros2 run learm_vision color_tracker --ros-args \
@@ -138,7 +156,18 @@ ros2 run learm_vision color_tracker --ros-args \
   -p pixel_format:=MJPG \
   -p frame_width:=320 \
   -p frame_height:=240 \
-  -p fps:=15
+  -p fps:=15 \
+  -p processing_rate_hz:=30.0 \
+  -p read_timeout_ms:=1000 \
+  -p show_mask:=false
+```
+
+If the OpenCV window shows a frozen image or large gray bands, check the camera
+driver first:
+
+```bash
+v4l2-ctl -d /dev/video0 --list-formats-ext
+v4l2-ctl -d /dev/video0 --set-fmt-video=width=640,height=480,pixelformat=MJPG --stream-mmap=3 --stream-count=1 --stream-to=/tmp/learm_camera_test.jpg --verbose
 ```
 
 The detector defaults to red. Presets are `red`, `green`, `blue`, and
