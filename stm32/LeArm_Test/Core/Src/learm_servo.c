@@ -27,7 +27,8 @@ static const LeArmServoOutput servoOutputs[LEARM_SERVO_MAX_ID + 1U] =
 
 static const uint16_t servoInitialPulseUs[LEARM_SERVO_MAX_ID + 1U] =
 {
-  0U, 1200U, 1500U, 1500U, 1500U, 1500U, 1500U
+  /* Power-on zero pose: gripper closed, joint_3/joint_4 at the measured -40 deg pose. */
+  0U, 1400U, 1500U, 1056U, 1056U, 1500U, 1500U
 };
 
 /* Maximum PWM change per 20 ms update. IDs map to gripper, joint_2..joint_6. */
@@ -196,7 +197,7 @@ void LeArm_ServoInit(void)
     servoMoving[id] = 0U;
     LeArm_ServoApply(id);
 
-    /* Apply the neutral pulse before enabling the output channel. */
+    /* Apply the configured power-on zero pulse before enabling the output channel. */
     if (HAL_TIM_PWM_Start(servoOutputs[id].timer, servoOutputs[id].channel) != HAL_OK)
     {
       Error_Handler();

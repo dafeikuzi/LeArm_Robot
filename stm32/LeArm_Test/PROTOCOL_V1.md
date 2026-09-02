@@ -33,7 +33,8 @@ a quintic S-curve profile to reduce start/stop shock.
 The firmware also emits a plain-text angle estimate line every 200 ms on the
 same UART, for example `ANG J1=-27 J2=0 J3=0 J4=0 J5=0 J6=0 deg`. These are
 PWM-derived estimates using `1500 us = 0 deg` and `500..2500 us = -90..90 deg`;
-they are not physical feedback.
+they are not physical feedback. The separate power-on pose is configured in
+`Core/Src/learm_servo.c`.
 
 The protocol reports firmware targets, not physical joint feedback. Keep an
 independent hardware emergency-stop or power cut-off for personnel safety.
