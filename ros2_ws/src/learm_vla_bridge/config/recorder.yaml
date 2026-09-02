@@ -1,0 +1,11 @@
+learm_vla_recorder:
+  ros__parameters:
+    image_topic: /learm_vla_observation/image_raw
+    observation_topic: /learm_vla_observation/observation
+    dataset_root: /home/liuzhiwei/LeArm_Robot/datasets/learm_vla/raw
+    task_override: ''
+    record_rate_hz: 5.0
+    max_frame_skew_s: 0.3
+    jpeg_quality: 95
+    action_duration_ms: 1000
+    require_task: true

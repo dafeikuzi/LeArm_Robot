@@ -7,6 +7,9 @@ ros2_ws/log/
 __pycache__/
 *.py[cod]
 
+# Raw VLA demonstrations are large and recorded locally.
+datasets/learm_vla/raw/
+
 # Keil MDK build outputs and per-user settings
 stm32/LeArm_Test/MDK-ARM/**/*.axf
 stm32/LeArm_Test/MDK-ARM/**/*.crf

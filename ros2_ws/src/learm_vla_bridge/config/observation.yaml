@@ -1,0 +1,43 @@
+learm_vla_observation:
+  ros__parameters:
+    camera_device: /dev/video0
+    camera_backend: v4l2
+    pixel_format: MJPG
+    frame_width: 640
+    frame_height: 480
+    camera_fps: 15
+    publish_rate_hz: 5.0
+    status_poll_rate_hz: 2.0
+    status_service: /learm_driver/get_status
+    task: ''
+    frame_id: learm_camera
+    reopen_interval_s: 2.0
+
+    # Keep these values identical to learm_driver.yaml after each calibration.
+    gripper.closed_pulse_us: 1400
+    gripper.open_pulse_us: 500
+
+    joint_2.min_position_rad: -1.57079632679
+    joint_2.max_position_rad: 1.57079632679
+    joint_2.pulse_at_min_position_us: 500
+    joint_2.pulse_at_max_position_us: 2500
+
+    joint_3.min_position_rad: -1.57079632679
+    joint_3.max_position_rad: 1.57079632679
+    joint_3.pulse_at_min_position_us: 500
+    joint_3.pulse_at_max_position_us: 2500
+
+    joint_4.min_position_rad: -1.57079632679
+    joint_4.max_position_rad: 1.57079632679
+    joint_4.pulse_at_min_position_us: 500
+    joint_4.pulse_at_max_position_us: 2500
+
+    joint_5.min_position_rad: -1.57079632679
+    joint_5.max_position_rad: 1.57079632679
+    joint_5.pulse_at_min_position_us: 500
+    joint_5.pulse_at_max_position_us: 2500
+
+    joint_6.min_position_rad: -1.57079632679
+    joint_6.max_position_rad: 1.57079632679
+    joint_6.pulse_at_min_position_us: 500
+    joint_6.pulse_at_max_position_us: 2500
