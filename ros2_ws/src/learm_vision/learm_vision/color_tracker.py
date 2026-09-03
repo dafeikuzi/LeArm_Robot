@@ -1,4 +1,7 @@
 import json
+import re
+import shutil
+import subprocess
 import threading
 import time
 
@@ -45,8 +48,6 @@ class ColorTracker(Node):
         self.target_color = str(self.declare_parameter('target_color', 'red').value)
         self.min_area = float(self.declare_parameter('min_area', 800.0).value)
         self.show_mask = _bool_parameter(self.declare_parameter('show_mask', False).value)
-        self.preview_width = int(self.declare_parameter('preview_width', 960).value)
-        self.preview_height = int(self.declare_parameter('preview_height', 540).value)
 
         self.publisher = self.create_publisher(String, '~/object_detection', 10)
         self.capture = None
@@ -67,10 +68,21 @@ class ColorTracker(Node):
         self.controls_name = 'HSV Controls'
         self.mask_name = 'LeArm Mask'
         self.timer_rate_hz = self.processing_rate_hz if self.processing_rate_hz > 0 else max(self.fps, 30.0)
+        # Allow manual window resizing. _preview_frame follows the X11 client
+        # area so the captured image enlarges with the window without stretching.
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(self.window_name, self.preview_width, self.preview_height)
+        if hasattr(cv2, 'WND_PROP_ASPECT_RATIO') and hasattr(cv2, 'WINDOW_FREERATIO'):
+            cv2.setWindowProperty(
+                self.window_name,
+                cv2.WND_PROP_ASPECT_RATIO,
+                cv2.WINDOW_FREERATIO,
+            )
         cv2.namedWindow(self.controls_name, cv2.WINDOW_NORMAL)
         self._create_trackbars()
+
+        self._xwininfo = shutil.which('xwininfo')
+        self._window_size = None
+        self._window_size_query_time = 0.0
 
         self._open_camera()
         self._start_capture_thread()
@@ -329,7 +341,7 @@ class ColorTracker(Node):
             )
         cv2.imshow(self.window_name, self._preview_frame(frame))
         if self.show_mask:
-            cv2.imshow(self.mask_name, self._preview_frame(mask))
+            cv2.imshow(self.mask_name, self._preview_frame(mask, self.mask_name))
         key = cv2.waitKey(1) & 0xFF
         if key in (27, ord('q')):
             rclpy.shutdown()
@@ -350,16 +362,79 @@ class ColorTracker(Node):
         cv2.imshow(self.window_name, self._preview_frame(frame))
         if self.show_mask:
             blank = np.zeros((height, width), dtype=np.uint8)
-            cv2.imshow(self.mask_name, self._preview_frame(blank))
+            cv2.imshow(self.mask_name, self._preview_frame(blank, self.mask_name))
 
-    def _preview_frame(self, frame):
-        if self.preview_width <= 0 or self.preview_height <= 0:
+    def _get_window_size(self, window_name):
+        """Return the X11 client size, or None when it cannot be queried."""
+        if self._xwininfo is None:
+            return None
+
+        now = time.monotonic()
+        if window_name == self.window_name and now - self._window_size_query_time < 0.1:
+            return self._window_size
+
+        try:
+            result = subprocess.run(
+                [self._xwininfo, '-root', '-tree'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=0.2,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+
+        title = f'"{window_name}"'
+        candidates = []
+        for line in result.stdout.splitlines():
+            if title not in line or 'mutter-x11-frames' in line:
+                continue
+            match = re.search(r'\)\s+(\d+)x(\d+)\+', line)
+            if match is None:
+                continue
+            width, height = (int(value) for value in match.groups())
+            if width > 32 and height > 32:
+                candidates.append((width, height))
+
+        size = max(candidates, key=lambda value: value[0] * value[1], default=None)
+        if window_name == self.window_name:
+            self._window_size = size
+            self._window_size_query_time = now
+        return size
+
+    def _preview_frame(self, frame, window_name=None):
+        """Fit a frame to its resizable window without changing its aspect ratio."""
+        if frame is None or frame.size == 0:
             return frame
-        return cv2.resize(
+
+        window_size = self._get_window_size(window_name or self.window_name)
+        if window_size is None:
+            return frame
+        window_width, window_height = window_size
+        frame_height, frame_width = frame.shape[:2]
+        if frame_width <= 0 or frame_height <= 0:
+            return frame
+
+        scale = min(window_width / frame_width, window_height / frame_height)
+        resized_width = max(1, round(frame_width * scale))
+        resized_height = max(1, round(frame_height * scale))
+        resized = cv2.resize(
             frame,
-            (self.preview_width, self.preview_height),
-            interpolation=cv2.INTER_LINEAR,
+            (resized_width, resized_height),
+            interpolation=cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR,
         )
+        if resized_width == window_width and resized_height == window_height:
+            return resized
+
+        if frame.ndim == 2:
+            canvas = np.zeros((window_height, window_width), dtype=frame.dtype)
+        else:
+            canvas = np.zeros((window_height, window_width, frame.shape[2]), dtype=frame.dtype)
+        offset_x = (window_width - resized_width) // 2
+        offset_y = (window_height - resized_height) // 2
+        canvas[offset_y:offset_y + resized_height, offset_x:offset_x + resized_width] = resized
+        return canvas
 
     def _detect_largest_object(self, mask):
         contours, _hierarchy = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)

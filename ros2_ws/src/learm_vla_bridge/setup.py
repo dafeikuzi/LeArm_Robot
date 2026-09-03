@@ -26,6 +26,7 @@ setup(
         'console_scripts': [
             'episode_recorder = learm_vla_bridge.episode_recorder:main',
             'observation_node = learm_vla_bridge.observation_node:main',
+            'vla_collection_gui = learm_vla_bridge.collection_gui:main',
         ],
     },
 )

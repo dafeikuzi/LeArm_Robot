@@ -130,8 +130,9 @@ ros2 run learm_vision color_tracker --ros-args -p camera_device:=/dev/video0
 ```
 
 The default camera format is `MJPG 1920x1080 @ 30fps`, which is the highest
-mode reported by the current webcam. The preview is displayed at `960x540`.
-You can override capture and preview sizes when needed:
+mode reported by the current webcam. The preview window can be resized
+manually, and the Qt toolbar's magnifying-glass buttons zoom the image while
+keeping its aspect ratio:
 
 ```bash
 ros2 run learm_vision color_tracker --ros-args \
@@ -140,8 +141,6 @@ ros2 run learm_vision color_tracker --ros-args \
   -p frame_width:=1920 \
   -p frame_height:=1080 \
   -p fps:=30 \
-  -p preview_width:=960 \
-  -p preview_height:=540 \
   -p processing_rate_hz:=30.0 \
   -p publish_rate_hz:=5.0 \
   -p read_timeout_ms:=1000

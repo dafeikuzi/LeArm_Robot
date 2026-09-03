@@ -18,5 +18,5 @@ The original paths remain available as symbolic links:
 4. Build the project and flash it with ST-Link.
 5. Commit only source and project files. The generated Keil outputs are ignored.
 
-The controller uses USART1 at 9600 baud, 8 data bits, no parity, and one stop bit.
+The controller uses USART1 at 115200 baud, 8 data bits, no parity, and one stop bit.
 Use a 3.3 V TTL USB-to-serial adapter with TX/RX crossed and a common ground.

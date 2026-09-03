@@ -16,7 +16,7 @@ Start the node after setting the correct serial port and baud rate:
 
 ```bash
 ros2 run arm_serial_control serial_controller --ros-args \
-  -p port:=/dev/ttyUSB0 -p baud_rate:=9600 -p auto_connect:=true
+  -p port:=/dev/ttyUSB0 -p baud_rate:=115200 -p auto_connect:=true
 ```
 
 The node exposes `connect`, `disconnect`, and `send_hex` services. Received

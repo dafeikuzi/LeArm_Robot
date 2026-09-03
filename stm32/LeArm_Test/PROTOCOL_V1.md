@@ -10,6 +10,9 @@ A5 5A | VERSION | SEQUENCE | COMMAND | PAYLOAD_LENGTH | PAYLOAD | CRC16_LO CRC16
 polynomial `0x1021`, no reflection, and covers bytes from `VERSION` through
 the end of `PAYLOAD`.
 
+The UART transport is `115200` baud, 8 data bits, no parity, and one stop bit
+(8N1). TX and RX use 3.3 V TTL levels and must share a ground.
+
 Commands:
 
 | Command | Payload | Response |

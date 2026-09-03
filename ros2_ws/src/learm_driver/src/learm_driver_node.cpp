@@ -96,7 +96,7 @@ public:
 
     transaction_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     serial_client_ = create_client<arm_serial_control::srv::SendHex>(
-      serial_service, rmw_qos_profile_services_default, transaction_callback_group_);
+      serial_service, rclcpp::ServicesQoS(), transaction_callback_group_);
     rclcpp::SubscriptionOptions subscription_options;
     subscription_options.callback_group = transaction_callback_group_;
     received_subscription_ = create_subscription<std_msgs::msg::String>(

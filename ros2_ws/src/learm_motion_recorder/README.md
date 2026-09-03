@@ -29,9 +29,11 @@ default `安全顺序` mode to execute `joint_6`, `joint_5 + joint_4`, and
 outside the staged motion. The table supports replacement, deletion, reordering,
 JSON save/load, and selected or full playback.
 
-`复位到零位` moves `joint_6`, `joint_5 + joint_4`, and `joint_3 + joint_2` to
-0 degrees in that order, then fully closes the gripper. Each stage takes
-2 seconds.
+`复位到零位` moves the arm to the STM32 power-on zero pose in a safe order:
+`joint_6=0°`, `joint_5=0° + joint_4=-40°`, and
+`joint_3=-40° + joint_2=0°`, then fully closes the gripper. This corresponds to
+the STM32 startup pulses `[1400, 1500, 1056, 1056, 1500, 1500]` for
+`joint_1` through `joint_6`. Each stage takes 2 seconds.
 
 The GUI shows target values and can read STM32 PWM estimates, but it does not
 provide physical encoder feedback.

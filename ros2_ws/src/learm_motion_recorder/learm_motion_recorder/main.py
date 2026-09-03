@@ -40,6 +40,10 @@ SERVO_NAMES = ('joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'joint_6')
 JOINT_LIMIT_DEGREES = 90.0
 GRIPPER_OPEN_PULSE_US = 500.0
 GRIPPER_CLOSED_PULSE_US = 1400.0
+# Must match stm32/LeArm_Test/Core/Src/learm_servo.c::servoInitialPulseUs.
+# Joint order is joint_2, joint_3, joint_4, joint_5, joint_6.
+ZERO_POSE_DEGREES = (0.0, -40.0, -40.0, 0.0, 0.0)
+ZERO_GRIPPER_OPENING = 0.0
 LIVE_SEND_INTERVAL_MS = 100
 STATUS_POLL_INTERVAL_MS = 500
 MIN_DURATION_MS = 200
@@ -181,8 +185,9 @@ class MotionRecorderWindow(QMainWindow):
         pose_box = QGroupBox('实时姿态控制')
         pose_layout = QFormLayout(pose_box)
         self.angle_controls = {}
-        for joint_name in JOINT_NAMES:
+        for index, joint_name in enumerate(JOINT_NAMES):
             control = AngleControl()
+            control.set_value_degrees(ZERO_POSE_DEGREES[index])
             self.angle_controls[joint_name] = control
             control.slider.valueChanged.connect(
                 lambda _value, name=joint_name: self._queue_joint(name))
@@ -194,11 +199,11 @@ class MotionRecorderWindow(QMainWindow):
         gripper_controls = QHBoxLayout()
         self.gripper_slider = QSlider(Qt.Horizontal)
         self.gripper_slider.setRange(0, 100)
-        self.gripper_slider.setValue(100)
+        self.gripper_slider.setValue(round(ZERO_GRIPPER_OPENING * 100.0))
         self.gripper_spin = QSpinBox()
         self.gripper_spin.setRange(0, 100)
         self.gripper_spin.setSuffix(' %')
-        self.gripper_spin.setValue(100)
+        self.gripper_spin.setValue(round(ZERO_GRIPPER_OPENING * 100.0))
         self.gripper_slider.valueChanged.connect(self._gripper_slider_changed)
         self.gripper_spin.valueChanged.connect(self._gripper_spin_changed)
         self.gripper_slider.valueChanged.connect(self._queue_gripper)
@@ -582,9 +587,13 @@ class MotionRecorderWindow(QMainWindow):
         self.playback_generation += 1
         self.playback_stages = [
             MotionStage('joints', '底座复位', duration_ms, ('joint_6',), (0.0,)),
-            MotionStage('joints', '肩肘复位', duration_ms, ('joint_5', 'joint_4'), (0.0, 0.0)),
-            MotionStage('joints', '腕部复位', duration_ms, ('joint_3', 'joint_2'), (0.0, 0.0)),
-            MotionStage('gripper', '夹爪闭合', duration_ms, opening=0.0),
+            MotionStage(
+                'joints', '肩肘复位', duration_ms, ('joint_5', 'joint_4'),
+                (ZERO_POSE_DEGREES[3], ZERO_POSE_DEGREES[2])),
+            MotionStage(
+                'joints', '腕部复位', duration_ms, ('joint_3', 'joint_2'),
+                (ZERO_POSE_DEGREES[1], ZERO_POSE_DEGREES[0])),
+            MotionStage('gripper', '夹爪闭合', duration_ms, opening=ZERO_GRIPPER_OPENING),
         ]
         self.playback_stage_index = 0
         self._update_controls()
@@ -697,8 +706,9 @@ class MotionRecorderWindow(QMainWindow):
 
     def _advance_after_keyframe(self, generation):
         if self.reset_active:
-            self._set_pose_controls([0.0] * len(JOINT_NAMES), 0.0)
-            self._finish_staged_motion('复位完成：joint_2 至 joint_6 已回到零位，夹爪已闭合。')
+            self._set_pose_controls(list(ZERO_POSE_DEGREES), ZERO_GRIPPER_OPENING)
+            self._finish_staged_motion(
+                '复位完成：已回到 STM32 上电零位（J2=0°, J3=-40°, J4=-40°, J5=0°, J6=0°），夹爪已闭合。')
             return
 
         self.playback_index += 1

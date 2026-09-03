@@ -27,7 +27,6 @@ namespace
 std::optional<speed_t> baud_to_termios(const int baud_rate)
 {
   switch (baud_rate) {
-    case 9600: return B9600;
     case 19200: return B19200;
     case 38400: return B38400;
     case 57600: return B57600;
@@ -85,7 +84,7 @@ public:
   : Node("serial_controller"), serial_fd_(-1)
   {
     port_ = declare_parameter<std::string>("port", "/dev/ttyUSB0");
-    baud_rate_ = declare_parameter<int>("baud_rate", 9600);
+    baud_rate_ = declare_parameter<int>("baud_rate", 115200);
     const auto auto_connect = declare_parameter<bool>("auto_connect", false);
     const auto read_period_ms = declare_parameter<int>("read_period_ms", 20);
     log_received_text_ = declare_parameter<bool>("log_received_text", true);

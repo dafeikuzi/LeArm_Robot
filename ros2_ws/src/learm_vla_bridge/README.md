@@ -52,6 +52,22 @@ current state, the STM32 target pose as the action label, a task description,
 and timestamps. The target pose is only a command-derived label, not physical
 feedback.
 
+## Collection GUI
+
+The collection GUI starts and supervises the local driver, manual control GUI,
+observation node, and episode recorder from one window. It also provides the
+start, successful stop, and abort controls for each episode:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source /home/liuzhiwei/LeArm_Robot/ros2_ws/install/setup.bash
+ros2 run learm_vla_bridge vla_collection_gui
+```
+
+Set the serial port, camera device, task, dataset directory, and frequencies,
+then use the buttons in order. The GUI only stops processes that it started.
+Use `成功结束` before closing the recorder when a demonstration succeeds.
+
 ```text
 datasets/learm_vla/raw/
   episode_000001/
@@ -66,6 +82,10 @@ and data recorder together with a task that describes the demonstration:
 ```bash
 ros2 launch learm_vla_bridge recording.launch.py \
   camera_device:=/dev/video0 \
+  camera_fps:=15 \
+  publish_rate_hz:=15.0 \
+  status_poll_rate_hz:=15.0 \
+  record_rate_hz:=15.0 \
   task:='Pick up the red block and place it in the bin.'
 ```
 
