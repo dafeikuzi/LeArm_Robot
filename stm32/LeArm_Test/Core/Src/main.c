@@ -33,7 +33,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define LEARM_ANGLE_REPORT_MS  200U
 #define LEARM_SERVO_UPDATE_MS  20U
 #define LEARM_PWM_TICK_HZ      1000000U
 /* USER CODE END PD */
@@ -76,7 +75,6 @@ static uint32_t LeArm_GetApb1TimerPrescaler(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-  uint32_t lastAngleReportTick;
   uint32_t lastServoTick;
   /* USER CODE END 1 */
 
@@ -104,7 +102,6 @@ int main(void)
   /* USER CODE BEGIN 2 */
   LeArm_ServoInit();
   LeArm_ProtocolInit(&huart1);
-  lastAngleReportTick = HAL_GetTick();
   lastServoTick = HAL_GetTick();
   /* USER CODE END 2 */
 
@@ -116,12 +113,6 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     LeArm_ProtocolTask();
-
-    if ((uint32_t)(HAL_GetTick() - lastAngleReportTick) >= LEARM_ANGLE_REPORT_MS)
-    {
-      lastAngleReportTick += LEARM_ANGLE_REPORT_MS;
-      LeArm_ProtocolSendAngleReport();
-    }
 
     if ((uint32_t)(HAL_GetTick() - lastServoTick) >= LEARM_SERVO_UPDATE_MS)
     {

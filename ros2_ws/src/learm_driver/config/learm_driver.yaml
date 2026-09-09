@@ -4,7 +4,7 @@ learm_driver:
     calibration_mode_enabled: false
     calibration_min_duration_ms: 200
     calibration_max_duration_ms: 1000
-    ack_timeout_ms: 1000
+    ack_timeout_ms: 3000
     serial_send_service: /serial_controller/send_hex
     serial_received_topic: /serial_controller/received_hex
 
