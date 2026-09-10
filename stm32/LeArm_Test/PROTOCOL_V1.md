@@ -12,6 +12,13 @@ the end of `PAYLOAD`.
 
 The UART transport is `115200` baud, 8 data bits, no parity, and one stop bit
 (8N1). TX and RX use 3.3 V TTL levels and must share a ground.
+Periodic angle debug text is disabled so that diagnostic text never shares the
+UART with binary protocol frames during normal operation.
+
+If UART overrun, framing, parity, or noise errors stop interrupt reception, the
+firmware discards any partial frame and rearms the one-byte receiver. The host
+may issue a new status request after recovery, but must not blindly repeat a
+motion command whose result is unknown.
 
 Commands:
 
@@ -32,12 +39,6 @@ For `move pulses`, `duration_ms` is a requested time. The firmware enforces a
 minimum servo motion time of 1000 ms and may extend the actual interpolation
 time further to satisfy per-servo PWM step limits. The servo interpolation uses
 a quintic S-curve profile to reduce start/stop shock.
-
-The firmware also emits a plain-text angle estimate line every 200 ms on the
-same UART, for example `ANG J1=-27 J2=0 J3=0 J4=0 J5=0 J6=0 deg`. These are
-PWM-derived estimates using `1500 us = 0 deg` and `500..2500 us = -90..90 deg`;
-they are not physical feedback. The separate power-on pose is configured in
-`Core/Src/learm_servo.c`.
 
 The protocol reports firmware targets, not physical joint feedback. Keep an
 independent hardware emergency-stop or power cut-off for personnel safety.

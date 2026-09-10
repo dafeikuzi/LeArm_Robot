@@ -1,5 +1,10 @@
 serial_controller:
   ros__parameters:
+    transport: tcp
+    tcp_host: 127.0.0.1
+    tcp_port: 8766
+    connect_timeout_ms: 1000
+    reconnect_interval_ms: 1000
     port: /dev/ttyUSB0
     baud_rate: 115200
     auto_connect: true

@@ -185,16 +185,6 @@ class MotionRecorderWindow(QMainWindow):
         pose_box = QGroupBox('实时姿态控制')
         pose_layout = QFormLayout(pose_box)
         self.angle_controls = {}
-        for index, joint_name in enumerate(JOINT_NAMES):
-            control = AngleControl()
-            control.set_value_degrees(ZERO_POSE_DEGREES[index])
-            self.angle_controls[joint_name] = control
-            control.slider.valueChanged.connect(
-                lambda _value, name=joint_name: self._queue_joint(name))
-            control.spin.valueChanged.connect(
-                lambda _value, name=joint_name: self._queue_joint(name))
-            control.slider.sliderReleased.connect(self._flush_live_command)
-            pose_layout.addRow(joint_name, control)
 
         gripper_controls = QHBoxLayout()
         self.gripper_slider = QSlider(Qt.Horizontal)
@@ -212,6 +202,17 @@ class MotionRecorderWindow(QMainWindow):
         gripper_controls.addWidget(self.gripper_slider, 1)
         gripper_controls.addWidget(self.gripper_spin)
         pose_layout.addRow('夹爪开合', gripper_controls)
+
+        for index, joint_name in enumerate(JOINT_NAMES):
+            control = AngleControl()
+            control.set_value_degrees(ZERO_POSE_DEGREES[index])
+            self.angle_controls[joint_name] = control
+            control.slider.valueChanged.connect(
+                lambda _value, name=joint_name: self._queue_joint(name))
+            control.spin.valueChanged.connect(
+                lambda _value, name=joint_name: self._queue_joint(name))
+            control.slider.sliderReleased.connect(self._flush_live_command)
+            pose_layout.addRow(joint_name, control)
 
         duration_controls = QHBoxLayout()
         self.duration_slider = QSlider(Qt.Horizontal)
@@ -585,15 +586,14 @@ class MotionRecorderWindow(QMainWindow):
         self.playback_active = True
         self.reset_active = True
         self.playback_generation += 1
+        # Reset one servo at a time to preserve the requested clearance order.
         self.playback_stages = [
-            MotionStage('joints', '底座复位', duration_ms, ('joint_6',), (0.0,)),
-            MotionStage(
-                'joints', '肩肘复位', duration_ms, ('joint_5', 'joint_4'),
-                (ZERO_POSE_DEGREES[3], ZERO_POSE_DEGREES[2])),
-            MotionStage(
-                'joints', '腕部复位', duration_ms, ('joint_3', 'joint_2'),
-                (ZERO_POSE_DEGREES[1], ZERO_POSE_DEGREES[0])),
-            MotionStage('gripper', '夹爪闭合', duration_ms, opening=ZERO_GRIPPER_OPENING),
+            MotionStage('joints', '舵机5复位', duration_ms, ('joint_5',), (ZERO_POSE_DEGREES[3],)),
+            MotionStage('joints', '舵机4复位', duration_ms, ('joint_4',), (ZERO_POSE_DEGREES[2],)),
+            MotionStage('joints', '舵机3复位', duration_ms, ('joint_3',), (ZERO_POSE_DEGREES[1],)),
+            MotionStage('joints', '舵机6复位', duration_ms, ('joint_6',), (ZERO_POSE_DEGREES[4],)),
+            MotionStage('joints', '舵机2复位', duration_ms, ('joint_2',), (ZERO_POSE_DEGREES[0],)),
+            MotionStage('gripper', '舵机1复位（夹爪闭合）', duration_ms, opening=ZERO_GRIPPER_OPENING),
         ]
         self.playback_stage_index = 0
         self._update_controls()
@@ -708,7 +708,7 @@ class MotionRecorderWindow(QMainWindow):
         if self.reset_active:
             self._set_pose_controls(list(ZERO_POSE_DEGREES), ZERO_GRIPPER_OPENING)
             self._finish_staged_motion(
-                '复位完成：已回到 STM32 上电零位（J2=0°, J3=-40°, J4=-40°, J5=0°, J6=0°），夹爪已闭合。')
+                '复位完成：已按舵机5、4、3、6、2、1顺序回到 STM32 上电零位，夹爪已闭合。')
             return
 
         self.playback_index += 1

@@ -494,6 +494,13 @@ void LeArm_ProtocolTask(void)
   uint8_t frame[LEARM_FRAME_MAX_LEN];
   uint8_t frameLength;
 
+  /* HAL stops interrupt reception after a blocking UART error such as ORE. */
+  if ((protocolUart != 0) && (protocolUart->RxState == HAL_UART_STATE_READY))
+  {
+    LeArm_ProtocolResetParser();
+    (void)HAL_UART_Receive_IT(protocolUart, (uint8_t *)&uartRxByte, 1U);
+  }
+
   LeArm_ProtocolServiceTx();
   while (LeArm_ProtocolPopFrame(frame, &frameLength) != 0U)
   {
@@ -517,5 +524,20 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   {
     LeArm_ProtocolAcceptByte(uartRxByte);
     (void)HAL_UART_Receive_IT(protocolUart, (uint8_t *)&uartRxByte, 1U);
+  }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  if (huart == protocolUart)
+  {
+    /* Discard a partial frame and restore the one-byte interrupt receiver. */
+    LeArm_ProtocolResetParser();
+    __HAL_UART_CLEAR_OREFLAG(huart);
+    huart->ErrorCode = HAL_UART_ERROR_NONE;
+    if (huart->RxState == HAL_UART_STATE_READY)
+    {
+      (void)HAL_UART_Receive_IT(protocolUart, (uint8_t *)&uartRxByte, 1U);
+    }
   }
 }

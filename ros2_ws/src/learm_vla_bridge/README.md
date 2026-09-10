@@ -3,7 +3,8 @@
 `learm_vla_bridge` is the local observation layer for a VLA policy hosted on a
 separate GPU machine. It does not send motion commands.
 
-`observation_node` reads one OpenCV camera and polls `/learm_driver/get_status`.
+`network_camera_node` pulls the newest JPEG from the Windows bridge. By default,
+`observation_node` subscribes to that ROS image and polls `/learm_driver/get_status`.
 It publishes:
 
 - `/learm_vla_observation/image_raw` (`sensor_msgs/Image`): BGR camera frames.
@@ -27,9 +28,9 @@ source install/setup.bash
 Start the arm driver first, then run the observation node:
 
 ```bash
-ros2 launch learm_driver learm_bringup.launch.py
-ros2 launch learm_vla_bridge observation.launch.py \
-  camera_device:=/dev/video0 \
+ros2 launch learm_driver learm_bringup.launch.py tcp_host:=172.28.224.1
+ros2 launch learm_vla_bridge tcp_collection.launch.py \
+  windows_host:=172.28.224.1 \
   task:='Pick up the red block and place it in the bin.'
 ```
 
@@ -51,6 +52,16 @@ arm. During manual control, each sample contains a JPEG frame, the PWM-derived
 current state, the STM32 target pose as the action label, a task description,
 and timestamps. The target pose is only a command-derived label, not physical
 feedback.
+
+Each observation also carries STM32 status health fields. A static arm is valid
+when the status values stay equal but successful status replies continue to
+refresh `stm32_status_generation`. The recorder waits for a new generation
+before an episode can start, reuses the last STM32 state when a status request
+times out, and does not discard video frames because the arm is static, a
+status value is unchanged, or a status request times out. Episode metadata records only
+`quality.status_timeout_count`; a successful episode remains trainable even if
+timeouts occurred. The converter itself does not perform any quality
+selection.
 
 ## Collection GUI
 
@@ -81,7 +92,8 @@ and data recorder together with a task that describes the demonstration:
 
 ```bash
 ros2 launch learm_vla_bridge recording.launch.py \
-  camera_device:=/dev/video0 \
+  camera_source:=topic \
+  windows_host:=172.28.224.1 \
   camera_fps:=15 \
   publish_rate_hz:=15.0 \
   status_poll_rate_hz:=15.0 \

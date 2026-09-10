@@ -45,6 +45,8 @@ class EpisodeRecorder(Node):
         self.episode_task = ''
         self.episode_started_at = None
         self.episode_outcome = 'in_progress'
+        self.episode_status_timeout_baseline = 0
+        self.status_timeout_count = 0
 
         self.image_subscription = self.create_subscription(
             Image, self.image_topic, self._on_image, 10)
@@ -66,6 +68,9 @@ class EpisodeRecorder(Node):
 
         self.latest_observation = observation
         if not self.recording:
+            return
+        self._update_status_health(observation)
+        if not observation.get('stm32_status_ok', False):
             return
         if not observation.get('state_valid', False):
             return
@@ -105,11 +110,14 @@ class EpisodeRecorder(Node):
             response.success = False
             response.message = 'waiting for a valid arm observation and target pose'
             return response
+        if not self.latest_observation.get('stm32_status_ok', False):
+            response.success = False
+            response.message = 'waiting for a successful STM32 status response'
+            return response
         if not self._has_valid_action(self.latest_observation):
             response.success = False
             response.message = 'waiting for a valid target action from the arm status'
             return response
-
         self.dataset_root.mkdir(parents=True, exist_ok=True)
         self.episode_task = self.task_override
         if self.require_task and not self.episode_task:
@@ -127,6 +135,10 @@ class EpisodeRecorder(Node):
         self.last_record_timestamp_ns = None
         self.episode_started_at = datetime.now(timezone.utc).isoformat()
         self.episode_outcome = 'in_progress'
+        baseline = self.latest_observation.get('status_timeout_count', 0)
+        self.episode_status_timeout_baseline = baseline if (
+            isinstance(baseline, int) and baseline >= 0) else 0
+        self.status_timeout_count = 0
         self.recording = True
         self._write_metadata(completed=False)
         response.success = True
@@ -169,6 +181,7 @@ class EpisodeRecorder(Node):
         self.records_path = None
         self.last_record_timestamp_ns = None
         self.episode_started_at = None
+        self.episode_status_timeout_baseline = 0
         return episode_name, sample_count
 
     def _write_sample(self, observation, timestamp_ns):
@@ -212,6 +225,11 @@ class EpisodeRecorder(Node):
             'observation_topic': self.observation_topic,
             'action_duration_ms': self.action_duration_ms,
             'state_source': 'stm32_pwm_estimate',
+            'quality': {
+                'trainable': completed,
+                'status': 'ok' if completed else 'incomplete',
+                'status_timeout_count': self.status_timeout_count,
+            },
         }
         (self.episode_dir / 'metadata.json').write_text(
             json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
@@ -237,6 +255,12 @@ class EpisodeRecorder(Node):
             all(isinstance(value, (int, float)) for value in positions) and
             isinstance(opening, (int, float))
         )
+
+    def _update_status_health(self, observation):
+        timeout_count = observation.get('status_timeout_count', 0)
+        if isinstance(timeout_count, int) and timeout_count >= 0:
+            episode_count = max(timeout_count - self.episode_status_timeout_baseline, 0)
+            self.status_timeout_count = max(self.status_timeout_count, episode_count)
 
     @staticmethod
     def _timestamp_to_ns(timestamp):

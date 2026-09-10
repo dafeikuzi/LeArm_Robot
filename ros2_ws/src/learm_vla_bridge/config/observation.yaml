@@ -1,5 +1,7 @@
 learm_vla_observation:
   ros__parameters:
+    camera_source: topic
+    camera_topic: /learm_network_camera/image_raw
     camera_device: /dev/video0
     camera_backend: v4l2
     pixel_format: MJPG
@@ -8,6 +10,7 @@ learm_vla_observation:
     camera_fps: 15
     publish_rate_hz: 5.0
     status_poll_rate_hz: 2.0
+    status_freshness_timeout_s: 1.0
     status_service: /learm_driver/get_status
     task: ''
     frame_id: learm_camera

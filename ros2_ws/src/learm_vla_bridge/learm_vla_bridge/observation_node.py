@@ -13,6 +13,7 @@ from learm_driver.srv import GetArmStatus
 
 
 JOINT_NAMES = ('joint_2', 'joint_3', 'joint_4', 'joint_5', 'joint_6')
+STM32_STATUS_TIMEOUT_ERROR_CODE = 101
 
 
 class ObservationNode(Node):
@@ -20,6 +21,9 @@ class ObservationNode(Node):
 
     def __init__(self):
         super().__init__('learm_vla_observation')
+        self.camera_source = self.declare_parameter('camera_source', 'topic').value
+        self.camera_topic = self.declare_parameter(
+            'camera_topic', '/learm_network_camera/image_raw').value
         self.camera_device = self.declare_parameter('camera_device', '/dev/video0').value
         self.camera_backend = self.declare_parameter('camera_backend', 'v4l2').value
         self.pixel_format = self.declare_parameter('pixel_format', 'MJPG').value
@@ -29,6 +33,8 @@ class ObservationNode(Node):
         self.publish_rate_hz = float(self.declare_parameter('publish_rate_hz', 5.0).value)
         self.status_poll_rate_hz = float(
             self.declare_parameter('status_poll_rate_hz', 2.0).value)
+        self.status_freshness_timeout_s = max(float(
+            self.declare_parameter('status_freshness_timeout_s', 1.0).value), 0.1)
         self.status_service_name = self.declare_parameter(
             'status_service', '/learm_driver/get_status').value
         self.task = self.declare_parameter('task', '').value
@@ -59,14 +65,44 @@ class ObservationNode(Node):
         self.status_client = self.create_client(GetArmStatus, self.status_service_name)
         self.status_future = None
         self.last_status = None
+        self.status_generation = 0
+        self.status_received_timestamp_ns = None
+        self.last_status_received_monotonic = None
+        self.status_success_count = 0
+        self.status_failure_count = 0
+        self.status_timeout_count = 0
+        self.last_status_error = ''
         self.capture = None
         self.last_open_attempt = 0.0
         self.last_camera_warning = 0.0
 
-        image_period_s = 1.0 / max(self.publish_rate_hz, 0.1)
         status_period_s = 1.0 / max(self.status_poll_rate_hz, 0.1)
-        self.image_timer = self.create_timer(image_period_s, self._publish_frame)
+        self.camera_subscription = None
+        self.image_timer = None
+        if self.camera_source == 'topic':
+            self.camera_subscription = self.create_subscription(
+                Image, self.camera_topic, self._receive_camera_frame, 10)
+            self.get_logger().info(f'Using ROS camera topic {self.camera_topic}')
+        elif self.camera_source == 'v4l2':
+            image_period_s = 1.0 / max(self.publish_rate_hz, 0.1)
+            self.image_timer = self.create_timer(image_period_s, self._publish_frame)
+        else:
+            raise ValueError("camera_source must be 'topic' or 'v4l2'")
         self.status_timer = self.create_timer(status_period_s, self._request_status)
+
+    def _receive_camera_frame(self, message):
+        timestamp = self.get_clock().now().to_msg()
+        output = Image()
+        output.header.stamp = timestamp
+        output.header.frame_id = message.header.frame_id or self.frame_id
+        output.height = message.height
+        output.width = message.width
+        output.encoding = message.encoding
+        output.is_bigendian = message.is_bigendian
+        output.step = message.step
+        output.data = message.data
+        self.image_publisher.publish(output)
+        self._publish_observation(timestamp)
 
     def _open_capture(self):
         now = time.monotonic()
@@ -111,13 +147,24 @@ class ObservationNode(Node):
         try:
             response = future.result()
         except Exception as exc:
+            self.status_failure_count += 1
+            self.last_status_error = str(exc)
             self.get_logger().warn(f'Cannot read arm status: {exc}')
             return
         if response is None or not response.success:
             message = response.message if response is not None else 'empty response'
+            self.status_failure_count += 1
+            self.last_status_error = message
+            if response is not None and response.error_code == STM32_STATUS_TIMEOUT_ERROR_CODE:
+                self.status_timeout_count += 1
             self.get_logger().warn(f'Arm status request failed: {message}')
             return
         self.last_status = response
+        self.status_generation += 1
+        self.status_success_count += 1
+        self.status_received_timestamp_ns = self.get_clock().now().nanoseconds
+        self.last_status_received_monotonic = time.monotonic()
+        self.last_status_error = ''
 
     def _publish_frame(self):
         if self.capture is None and not self._open_capture():
@@ -142,6 +189,11 @@ class ObservationNode(Node):
 
     def _publish_observation(self, timestamp):
         status = self.last_status
+        status_age_ms = None
+        status_fresh = False
+        if self.last_status_received_monotonic is not None:
+            status_age_ms = max(0.0, (time.monotonic() - self.last_status_received_monotonic) * 1000.0)
+            status_fresh = status_age_ms <= (self.status_freshness_timeout_s * 1000.0)
         payload = {
             'timestamp': {
                 'sec': timestamp.sec,
@@ -149,7 +201,16 @@ class ObservationNode(Node):
             },
             'task': self.task,
             'state_source': 'stm32_pwm_estimate',
-            'state_valid': status is not None,
+            'state_valid': False,
+            'stm32_status_ok': status is not None,
+            'stm32_status_generation': self.status_generation,
+            'status_received_timestamp_ns': self.status_received_timestamp_ns,
+            'status_age_ms': round(status_age_ms, 3) if status_age_ms is not None else None,
+            'status_fresh': status_fresh,
+            'status_success_count': self.status_success_count,
+            'status_failure_count': self.status_failure_count,
+            'status_timeout_count': self.status_timeout_count,
+            'status_last_error': self.last_status_error,
         }
         if status is not None:
             current_pulses = [int(value) for value in status.current_pulse_us]
@@ -164,6 +225,9 @@ class ObservationNode(Node):
                 'target_pulse_us': target_pulses,
                 'state': current_state,
                 'target_state': target_state,
+                # A stale status is still a usable last-known state.  Freshness
+                # is exposed for diagnostics, but must not interrupt video or
+                # discard a frame when the arm is simply holding position.
                 'state_valid': current_state is not None and target_state is not None,
             })
 

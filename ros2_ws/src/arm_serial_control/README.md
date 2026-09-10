@@ -1,6 +1,6 @@
 # arm_serial_control
 
-This package provides a generic serial transport node. It does not define arm
+This package provides a generic TCP or native serial transport node. It does not define arm
 movement commands because those bytes are specific to the arm controller.
 
 Build from the workspace root:
@@ -12,11 +12,18 @@ colcon build --packages-select arm_serial_control
 source install/setup.bash
 ```
 
-Start the node after setting the correct serial port and baud rate:
+WSL defaults to the Windows TCP hardware bridge:
 
 ```bash
 ros2 run arm_serial_control serial_controller --ros-args \
-  -p port:=/dev/ttyUSB0 -p baud_rate:=115200 -p auto_connect:=true
+  -p transport:=tcp -p tcp_host:=172.28.224.1 -p tcp_port:=8766
+```
+
+Native Linux serial remains available as a fallback:
+
+```bash
+ros2 run arm_serial_control serial_controller --ros-args \
+  -p transport:=serial -p port:=/dev/ttyUSB0 -p baud_rate:=115200
 ```
 
 The node exposes `connect`, `disconnect`, and `send_hex` services. Received

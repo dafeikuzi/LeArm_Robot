@@ -29,11 +29,13 @@ default `安全顺序` mode to execute `joint_6`, `joint_5 + joint_4`, and
 outside the staged motion. The table supports replacement, deletion, reordering,
 JSON save/load, and selected or full playback.
 
-`复位到零位` moves the arm to the STM32 power-on zero pose in a safe order:
-`joint_6=0°`, `joint_5=0° + joint_4=-40°`, and
-`joint_3=-40° + joint_2=0°`, then fully closes the gripper. This corresponds to
-the STM32 startup pulses `[1400, 1500, 1056, 1056, 1500, 1500]` for
-`joint_1` through `joint_6`. Each stage takes 2 seconds.
+`复位到零位` moves one servo at a time to the STM32 power-on zero pose in this
+order: servo 5 (`joint_5`), servo 4 (`joint_4`), servo 3 (`joint_3`), servo 6
+(`joint_6`), servo 2 (`joint_2`), and servo 1 (the gripper). The target pose is
+`joint_2=0°`, `joint_3=-40°`, `joint_4=-40°`, `joint_5=0°`, `joint_6=0°`, with
+the gripper fully closed. This corresponds to the STM32 startup pulses
+`[1400, 1500, 1056, 1056, 1500, 1500]` for `joint_1` through `joint_6`.
+Each stage takes 2 seconds.
 
 The GUI shows target values and can read STM32 PWM estimates, but it does not
 provide physical encoder feedback.

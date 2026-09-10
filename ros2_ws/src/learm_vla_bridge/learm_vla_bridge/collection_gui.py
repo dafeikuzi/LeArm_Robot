@@ -56,7 +56,7 @@ class VlaCollectionWindow(QMainWindow):
         self.workspace_edit = QLineEdit(str(DEFAULT_WORKSPACE))
         self.serial_port_edit = QLineEdit('/dev/ttyUSB0')
         self.camera_device_edit = QLineEdit('/dev/video0')
-        self.task_edit = QLineEdit('抓取红色玩偶')
+        self.task_edit = QLineEdit('抓取棕色小狗')
 
         dataset_row = QHBoxLayout()
         self.dataset_root_edit = QLineEdit(str(DEFAULT_DATASET_ROOT))
@@ -338,6 +338,10 @@ class VlaCollectionWindow(QMainWindow):
             self.service_output += output
         for line in output.rstrip().splitlines():
             self._append_log(f'[{label}] {line}')
+            if process is self.vla_process:
+                normalized = line.lower()
+                if 'status request failed' in normalized or 'cannot read arm status' in normalized:
+                    self._set_process_status('STM32 状态查询出现告警，请查看日志；当前记录继续使用最近状态。')
 
     def _handle_long_process_finished(self, label, exit_code):
         self._append_log(f'[{label}] 已退出，返回码 {exit_code}。')
